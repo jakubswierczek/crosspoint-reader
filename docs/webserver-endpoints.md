@@ -89,8 +89,17 @@ Hidden dotfiles are omitted unless the device setting `showHiddenFiles` is
 enabled. `System Volume Information` and `XTCache` are always hidden/protected.
 
 The saved-credential stores (`/.crosspoint/wifi.json`, `opds.json`,
-`koreader.json`) can never be downloaded, uploaded, renamed, moved, deleted or
-written by a plugin over the network, however the path is spelled.
+`koreader.json`, `opds_tokens.json`, `lcp_passphrases.json`, and
+`lcp_device.json`) can never be downloaded, uploaded, renamed, moved, deleted,
+or written by a plugin over the network, however the path is spelled. The same
+rule applies to WebDAV, including directory listings.
+
+Plugin secret files (`token.json`, `secret.json`, `credentials.json`), a name
+that continues after that basename (`token.json.bak`), `*.key` files, and a
+later suffix such as `book.epub.key.bak` are not listed, downloaded, uploaded,
+renamed, moved, or deleted, including over WebSocket. A plugin still writes
+`token.json` with `POST /api/plugin-fs`. Book content keys are stored with
+`POST /api/book-key`, not by downloading the `.key` file.
 
 ### `GET /download`
 
@@ -106,8 +115,8 @@ Query parameters:
 |-----------|----------|-------------|
 | `path` | Yes | File path to download |
 
-Protected dotfiles, `System Volume Information`, `XTCache`, and the credential
-stores cannot be downloaded. EPUB files are served as `application/epub+zip`; other files use
+Protected dotfiles, `System Volume Information`, `XTCache`, the credential
+stores, and the plugin secret names above cannot be downloaded. EPUB files are served as `application/epub+zip`; other files use
 `application/octet-stream`.
 
 ### `POST /upload`
@@ -207,8 +216,9 @@ Form parameters:
 | `path` | Yes, unless `paths` is provided | Single path to delete |
 | `paths` | Yes, unless `path` is provided | JSON array of paths to delete |
 
-`System Volume Information`, `XTCache` and the saved-credential stores cannot be
-deleted. Hidden items (names that start with `.`) can be deleted. Non-empty
+`System Volume Information`, `XTCache`, the saved-credential stores, and the
+plugin secret names above cannot be deleted. Hidden items (names that start
+with `.`) can be deleted. Non-empty
 folders are rejected. EPUB cache data for deleted files is cleared.
 
 ## Settings API
@@ -490,7 +500,10 @@ OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, MKCOL, MOVE, COPY, LOCK, UNLOCK
 Notes:
 
 - `PUT` writes to a temporary `.davtmp` file first, then renames it into place.
-- Protected paths are rejected.
+- Protected paths are rejected. WebDAV uses the same path check as the file
+  API: folded case, trimmed spaces, `..`, and 8.3 short names. Any path segment
+  that starts with `.`, `System Volume Information`, `XTCache`, a credential
+  store, or a plugin secret is not listed or transferred.
 - `LOCK` and `UNLOCK` are accepted for client compatibility only. The server
   does not implement full WebDAV Class 2 locking semantics such as persistent
   locks or lock discovery.
@@ -543,8 +556,10 @@ Installed plugins that ship a `plugin.js`:
 ### `GET /plugin?name=<plugin>&file=<file>`
 
 Serves one file from the plugin's folder (first root holding that name). Both
-parameters must be single path components (no `/`, `\`, or `..`); 404 when
-the plugin, file, or a directory is requested.
+parameters must be single path components (no `/`, `\`, or `..`). A secret
+basename (`token.json`, `secret.json`, `credentials.json`, a dotted sibling
+such as `token.json.bak`, or `*.key`) is 403. 404 when the plugin, file, or a
+directory is requested.
 
 ### `POST /api/relay`
 
