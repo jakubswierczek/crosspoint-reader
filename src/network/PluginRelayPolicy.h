@@ -34,6 +34,82 @@ inline int hexValue(char c) {
   return -1;
 }
 
+// Same shapes lwIP ip4addr_aton accepts: hex (0x), octal (leading 0), and
+// one to four parts (a, a.b, a.b.c, a.b.c.d). The TCP stack parses these
+// before DNS, so a name-shaped allow would still connect.
+inline bool parseLwipIpv4(const char* begin, const char* end, uint8_t out[4]) {
+  if (begin == nullptr || end < begin || static_cast<size_t>(end - begin) > 253) return false;
+  const char* cp = begin;
+  uint32_t parts[4];
+  uint32_t* pp = parts;
+  uint32_t val = 0;
+  auto advance = [&]() -> char {
+    if (cp >= end) return '\0';
+    ++cp;
+    return cp < end ? *cp : '\0';
+  };
+  char c = cp < end ? *cp : '\0';
+  for (;;) {
+    if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+    val = 0;
+    int base = 10;
+    if (c == '0') {
+      c = advance();
+      if (c == 'x' || c == 'X') {
+        base = 16;
+        c = advance();
+      } else {
+        base = 8;
+      }
+    }
+    for (;;) {
+      if (std::isdigit(static_cast<unsigned char>(c))) {
+        if (base == 8 && static_cast<unsigned>(c - '0') >= 8) break;
+        val = val * static_cast<uint32_t>(base) + static_cast<uint32_t>(c - '0');
+        c = advance();
+      } else if (base == 16 && std::isxdigit(static_cast<unsigned char>(c))) {
+        const unsigned char lower = static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(c)));
+        val = (val << 4) | static_cast<uint32_t>(lower <= '9' ? lower - '0' : lower - 'a' + 10);
+        c = advance();
+      } else {
+        break;
+      }
+    }
+    if (c == '.') {
+      if (pp >= parts + 3) return false;
+      *pp++ = val;
+      c = advance();
+    } else {
+      break;
+    }
+  }
+  if (c != '\0' || cp != end) return false;
+
+  switch (pp - parts + 1) {
+    case 1:
+      break;
+    case 2:
+      if (val > 0xffffffUL || parts[0] > 0xff) return false;
+      val |= parts[0] << 24;
+      break;
+    case 3:
+      if (val > 0xffffUL || parts[0] > 0xff || parts[1] > 0xff) return false;
+      val |= (parts[0] << 24) | (parts[1] << 16);
+      break;
+    case 4:
+      if (val > 0xff || parts[0] > 0xff || parts[1] > 0xff || parts[2] > 0xff) return false;
+      val |= (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8);
+      break;
+    default:
+      return false;
+  }
+  out[0] = static_cast<uint8_t>(val >> 24);
+  out[1] = static_cast<uint8_t>((val >> 16) & 0xff);
+  out[2] = static_cast<uint8_t>((val >> 8) & 0xff);
+  out[3] = static_cast<uint8_t>(val & 0xff);
+  return true;
+}
+
 inline bool parseIpv4(const char* begin, const char* end, uint8_t out[4]) {
   const char* cursor = begin;
   for (int octet = 0; octet < 4; ++octet) {
@@ -174,7 +250,7 @@ inline UrlReject classifyHost(const char* host, size_t length) {
     if (lower[i] != '.' && !std::isdigit(static_cast<unsigned char>(lower[i]))) onlyDigitsAndDots = false;
   }
   uint8_t ip[4];
-  if (parseIpv4(lower, lower + length, ip)) return classifyIpv4(ip);
+  if (parseLwipIpv4(lower, lower + length, ip)) return classifyIpv4(ip);
   if (onlyDigitsAndDots) return UrlReject::Host;
 
   const char* label = lower;

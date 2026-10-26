@@ -31,9 +31,16 @@ TEST(PluginRelayPolicyTest, RejectsLoopbackLinkLocalAndUserinfo) {
 }
 
 TEST(PluginRelayPolicyTest, RejectsObscuredHostsAndBadPorts) {
-  EXPECT_EQ(pluginrelay::checkUrl("http://2130706433/"), pluginrelay::UrlReject::Host);
-  EXPECT_EQ(pluginrelay::checkUrl("http://127.1/"), pluginrelay::UrlReject::Host);
-  EXPECT_EQ(pluginrelay::checkUrl("http://0177.0.0.1/"), pluginrelay::UrlReject::Host);
+  EXPECT_EQ(pluginrelay::checkUrl("http://2130706433/"), pluginrelay::UrlReject::Loopback);
+  EXPECT_EQ(pluginrelay::checkUrl("http://127.1/"), pluginrelay::UrlReject::Loopback);
+  EXPECT_EQ(pluginrelay::checkUrl("http://0177.0.0.1/"), pluginrelay::UrlReject::Loopback);
+  EXPECT_EQ(pluginrelay::checkUrl("http://0x7f000001/"), pluginrelay::UrlReject::Loopback);
+  EXPECT_EQ(pluginrelay::checkUrl("http://0x7f.0.0.1/"), pluginrelay::UrlReject::Loopback);
+  EXPECT_EQ(pluginrelay::checkUrl("http://127.0.0.0x1/"), pluginrelay::UrlReject::Loopback);
+  EXPECT_EQ(pluginrelay::checkUrl("http://0xa9fea9fe/"), pluginrelay::UrlReject::LinkLocal);
+  EXPECT_EQ(pluginrelay::checkUrl("http://0xa9.0xfe.0xa9.0xfe/"), pluginrelay::UrlReject::LinkLocal);
+  EXPECT_EQ(pluginrelay::checkUrl("http://0x0/"), pluginrelay::UrlReject::Loopback);
+  EXPECT_TRUE(pluginrelay::urlAllowed("http://0xC0A80001/"));
   EXPECT_EQ(pluginrelay::checkUrl("http://127.0.0.1%2e/"), pluginrelay::UrlReject::Host);
   EXPECT_EQ(pluginrelay::checkUrl("http://example.com:/"), pluginrelay::UrlReject::Port);
   EXPECT_EQ(pluginrelay::checkUrl("http://example.com:0/"), pluginrelay::UrlReject::Port);
