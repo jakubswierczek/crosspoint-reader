@@ -40,6 +40,16 @@ class ChapterHtmlSlimParser {
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
   int partWordBufferIndex = 0;
   bool nextWordContinues = false;  // true when next flushed word attaches to previous (inline element boundary)
+  // A Polish one-letter word was flushed and still owes its continued space.
+  // The space is emitted when the next word starts. A block end drops it, so a
+  // trailing newline does not leave a gap. Extra whitespace must not clear it.
+  bool polishGlueArmed = false;
+  uint32_t polishGlueOffset = 0;
+  // Style of the owed space, captured when it is armed. The next word may be
+  // inside a link or a sized span; the space stays with the style it had.
+  EpdFontFamily::Style polishGlueStyle = EpdFontFamily::REGULAR;
+  uint8_t polishGlueLinkId = 0;
+  uint8_t polishGlueSizeSlot = 0;
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   // Ruby text state
   bool inRuby = false;
@@ -262,7 +272,9 @@ class ChapterHtmlSlimParser {
   void planTableColumns(const TableColumnMeasure& measure);
   void applyPendingPageBreak();
   void pushBlockStyle(const BlockStyle& accumulated);
-  void flushPartWordBuffer();
+  void flushPartWordBuffer(bool owedPolishSpace = false);
+  void rememberPolishGlueStyle();
+  bool lastTokenIsPolishSingleLetter() const;
   void breakTextLine(const BlockStyle& style);
   void fallbackTableRowToStacked();
   void closeTableCell();

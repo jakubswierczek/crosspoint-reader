@@ -37,7 +37,13 @@ class Hyphenator {
 
   // Provide a publication-level language hint (e.g. "en", "en-US", "ru") used to select hyphenation rules.
   static void setPreferredLanguage(const std::string& lang);
+  // True when the hint selected the Polish hyphenator. The HTML parser uses it
+  // to keep a single-letter Polish word with the word that follows.
+  static bool polishTypography();
+  // Dictionary HTML is not the book. Returns the previous value.
+  static bool replacePolishTypography(bool active);
 
  private:
   static const LanguageHyphenator* cachedHyphenator_;
+  static bool polishTypographyActive_;
 };

@@ -107,7 +107,6 @@ class ParsedText {
   std::vector<uint8_t> reorderedFocusBoundaryScratch;
   std::vector<uint16_t> visualOrderScratch;
 
-  std::string_view wordAt(const size_t i) const { return wordStore.view(words[i]); }
   bool storeWord(std::string_view text, WordStore::StoredWord& out);
   uint32_t visibleOffsetBaseAt(size_t wordIndex) const;
   uint32_t visibleOffsetAt(size_t wordIndex) const;
@@ -154,6 +153,8 @@ class ParsedText {
   void setRubyForWordAt(size_t index, const std::string& ruby);
   void setRubyGroupAt(size_t startIndex, size_t count, const std::string& ruby);
   // The word's renderer style: stored flags removed, small caps restored from its size slot.
+  std::string_view wordAt(const size_t i) const { return wordStore.view(words[i]); }
+  bool wordContinuesAt(const size_t i) const { return i < wordContinues.size() && wordContinues[i]; }
   EpdFontFamily::Style getWordStyleAt(size_t index) const {
     if (index >= wordStyles.size()) return EpdFontFamily::REGULAR;
     const bool smallCaps = index < wordSizeSlots.size() && (wordSizeSlots[index] & TextBlock::SMALL_CAPS_SLOT_FLAG);
