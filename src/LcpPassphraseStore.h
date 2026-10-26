@@ -27,7 +27,7 @@ class LcpPassphraseStore : public PersistableStore<LcpPassphraseStore> {
 
  public:
   static const char* getFilePath() { return "/.crosspoint/lcp_passphrases.json"; }
-  void toJson(JsonDocument& doc) const;
+  bool toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 
   // The stored hash for a provider (empty when none).

@@ -73,21 +73,18 @@ void xorTransform(std::string& data, const uint8_t* key, size_t keyLen) {
   }
 }
 
-String obfuscateToBase64(const std::string& plaintext) {
-  if (plaintext.empty()) return "";
-  std::string temp = plaintext;
-  uint8_t v2Key[V2_KEY_LEN];
-  const bool v2 = copyV2Key(v2Key);
-  if (v2) {
-    xorTransform(temp, v2Key, V2_KEY_LEN);
-  } else {
-    xorTransform(temp);
+bool obfuscateToBase64(const std::string& plaintext, String& out) {
+  if (plaintext.empty()) {
+    out = "";
+    return true;
   }
-  String encoded = base64::encode(reinterpret_cast<const uint8_t*>(temp.data()), temp.size());
-  if (!v2) return encoded;
-  String prefixed("v2.");
-  prefixed += encoded;
-  return prefixed;
+  uint8_t v2Key[V2_KEY_LEN];
+  if (!copyV2Key(v2Key)) return false;
+  std::string temp = plaintext;
+  xorTransform(temp, v2Key, V2_KEY_LEN);
+  out = V2_PREFIX;
+  out += base64::encode(reinterpret_cast<const uint8_t*>(temp.data()), temp.size());
+  return true;
 }
 
 std::string deobfuscateFromBase64(const char* encoded, bool* ok, bool* legacy) {
@@ -142,8 +139,8 @@ std::string deobfuscateFromBase64(const char* encoded, const size_t maxDecodedLe
     xorTransform(result, v2Key, V2_KEY_LEN);
   } else {
     xorTransform(result);
-    if (legacy && haveV2) *legacy = true;
   }
+  if (legacy) *legacy = shouldUpgradeStoredForm(encoded, haveV2);
   return result;
 }
 
@@ -151,7 +148,12 @@ void selfTest() {
   const char* testInputs[] = {"", "hello", "WiFi P@ssw0rd!", "a"};
   bool allPassed = true;
   for (const char* input : testInputs) {
-    String encoded = obfuscateToBase64(std::string(input));
+    String encoded;
+    if (!obfuscateToBase64(std::string(input), encoded)) {
+      LOG_ERR("OBF", "FAIL: key unavailable for \"%s\"", input);
+      allPassed = false;
+      continue;
+    }
     std::string decoded = deobfuscateFromBase64(encoded.c_str());
     if (decoded != input) {
       LOG_ERR("OBF", "FAIL: \"%s\" -> \"%s\" -> \"%s\"", input, encoded.c_str(), decoded.c_str());
@@ -159,7 +161,11 @@ void selfTest() {
     }
   }
   // Verify obfuscated form differs from plaintext
-  String enc = obfuscateToBase64("test123");
+  String enc;
+  if (!obfuscateToBase64("test123", enc)) {
+    LOG_ERR("OBF", "FAIL: key unavailable");
+    allPassed = false;
+  }
   if (enc == "test123") {
     LOG_ERR("OBF", "FAIL: obfuscated output identical to plaintext");
     allPassed = false;

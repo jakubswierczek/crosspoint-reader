@@ -11,15 +11,20 @@ namespace {
 constexpr size_t MAX_TOKEN_CHARS = 2048;
 }  // namespace
 
-void OpdsTokenStore::toJson(JsonDocument& doc) const {
+bool OpdsTokenStore::toJson(JsonDocument& doc) const {
   JsonArray arr = doc["tokens"].to<JsonArray>();
   for (const auto& entry : entries) {
     JsonObject obj = arr.add<JsonObject>();
     obj["url"] = entry.url;
-    obj["access_obf"] = obfuscation::obfuscateToBase64(entry.tokens.accessToken);
-    obj["refresh_obf"] = obfuscation::obfuscateToBase64(entry.tokens.refreshToken);
+    String accessObf;
+    String refreshObf;
+    if (!obfuscation::obfuscateToBase64(entry.tokens.accessToken, accessObf)) return false;
+    if (!obfuscation::obfuscateToBase64(entry.tokens.refreshToken, refreshObf)) return false;
+    obj["access_obf"] = accessObf;
+    obj["refresh_obf"] = refreshObf;
     obj["refresh_url"] = entry.tokens.refreshUrl;
   }
+  return true;
 }
 
 bool OpdsTokenStore::fromJson(JsonVariantConst doc) {

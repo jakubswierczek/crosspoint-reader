@@ -39,7 +39,7 @@ class OpdsTokenStore : public PersistableStore<OpdsTokenStore> {
 
  public:
   static const char* getFilePath() { return "/.crosspoint/opds_tokens.json"; }
-  void toJson(JsonDocument& doc) const;
+  bool toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 
   // Returns the stored tokens for a server URL (empty when none).

@@ -10,13 +10,16 @@ namespace {
 constexpr size_t MAX_HASH_CHARS = 64;
 }  // namespace
 
-void LcpPassphraseStore::toJson(JsonDocument& doc) const {
+bool LcpPassphraseStore::toJson(JsonDocument& doc) const {
   JsonArray arr = doc["passphrases"].to<JsonArray>();
   for (const auto& entry : entries) {
     JsonObject obj = arr.add<JsonObject>();
     obj["provider"] = entry.provider;
-    obj["key_obf"] = obfuscation::obfuscateToBase64(entry.userKeyHex);
+    String keyObf;
+    if (!obfuscation::obfuscateToBase64(entry.userKeyHex, keyObf)) return false;
+    obj["key_obf"] = keyObf;
   }
+  return true;
 }
 
 bool LcpPassphraseStore::fromJson(JsonVariantConst doc) {

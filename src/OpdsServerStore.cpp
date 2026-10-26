@@ -6,21 +6,26 @@
 #include <algorithm>
 #include <cstring>
 
-void OpdsServerStore::toJson(JsonDocument& doc) const {
+bool OpdsServerStore::toJson(JsonDocument& doc) const {
   JsonArray arr = doc["servers"].to<JsonArray>();
   for (const auto& server : servers) {
     JsonObject obj = arr.add<JsonObject>();
     obj["name"] = server.name;
     obj["url"] = server.url;
     obj["username"] = server.username;
-    obj["password_obf"] = obfuscation::obfuscateToBase64(server.password);
+    String passwordObf;
+    if (!obfuscation::obfuscateToBase64(server.password, passwordObf)) return false;
+    obj["password_obf"] = passwordObf;
     JsonArray headers = obj["headers"].to<JsonArray>();
     for (const auto& header : server.customHeaders) {
       JsonObject headerObj = headers.add<JsonObject>();
       headerObj["name"] = header.name;
-      headerObj["value_obf"] = obfuscation::obfuscateToBase64(header.value);
+      String valueObf;
+      if (!obfuscation::obfuscateToBase64(header.value, valueObf)) return false;
+      headerObj["value_obf"] = valueObf;
     }
   }
+  return true;
 }
 
 bool OpdsServerStore::fromJson(JsonVariantConst doc) {

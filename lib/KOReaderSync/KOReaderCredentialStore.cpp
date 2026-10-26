@@ -18,10 +18,12 @@ constexpr char LEGACY_DEFAULT_SERVER_URL[] = "https://sync.koreader.rocks:443";
 constexpr uint8_t CONFIG_VERSION = 3;
 }  // namespace
 
-void KOReaderCredentialStore::toJson(JsonDocument& doc) const {
+bool KOReaderCredentialStore::toJson(JsonDocument& doc) const {
   doc["cfgVersion"] = CONFIG_VERSION;
   doc["username"] = getUsername();
-  doc["password_obf"] = obfuscation::obfuscateToBase64(getPassword());
+  String passwordObf;
+  if (!obfuscation::obfuscateToBase64(getPassword(), passwordObf)) return false;
+  doc["password_obf"] = passwordObf;
   doc["serverUrl"] = getServerUrl();
   doc["serverType"] = static_cast<uint8_t>(getServerType());
   doc["matchMethod"] = static_cast<uint8_t>(getMatchMethod());
@@ -32,8 +34,11 @@ void KOReaderCredentialStore::toJson(JsonDocument& doc) const {
   for (const auto& header : customHeaders) {
     JsonObject headerObj = headers.add<JsonObject>();
     headerObj["name"] = header.name;
-    headerObj["value_obf"] = obfuscation::obfuscateToBase64(header.value);
+    String valueObf;
+    if (!obfuscation::obfuscateToBase64(header.value, valueObf)) return false;
+    headerObj["value_obf"] = valueObf;
   }
+  return true;
 }
 
 bool KOReaderCredentialStore::fromJson(JsonVariantConst doc) {

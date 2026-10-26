@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-void WifiCredentialStore::toJson(JsonDocument& doc) const {
+bool WifiCredentialStore::toJson(JsonDocument& doc) const {
   std::lock_guard<std::mutex> lock(credentialMutex);
   doc["lastConnectedSsid"] = lastConnectedSsid;
 
@@ -14,13 +14,16 @@ void WifiCredentialStore::toJson(JsonDocument& doc) const {
   for (const auto& cred : credentials) {
     JsonObject obj = arr.add<JsonObject>();
     obj["ssid"] = cred.ssid;
-    obj["password_obf"] = obfuscation::obfuscateToBase64(cred.password);
+    String passwordObf;
+    if (!obfuscation::obfuscateToBase64(cred.password, passwordObf)) return false;
+    obj["password_obf"] = passwordObf;
     // XOR and base64 must round-trip to exactly this many bytes. Keeping the
     // original length lets the loader reject a decodable-but-corrupted value
     // instead of silently trying a different password.
     obj["password_len"] = cred.password.size();
     obj["password_crc32"] = credential_integrity::crc32(cred.password);
   }
+  return true;
 }
 
 bool WifiCredentialStore::fromJson(JsonVariantConst doc) {

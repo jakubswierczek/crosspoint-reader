@@ -23,14 +23,14 @@ void xorTransform(std::string& data);
 // Legacy overload for binary migration (uses the old per-store hardcoded keys)
 void xorTransform(std::string& data, const uint8_t* key, size_t keyLen);
 
-// Obfuscate a plaintext string for JSON storage. Uses the NVS key when it can
-// be read or created; otherwise the MAC form, so a failed NVS write does not
-// drop the secret.
-String obfuscateToBase64(const std::string& plaintext);
+// Obfuscate a plaintext string for JSON storage. Writes only the "v2." form.
+// Returns false when the NVS key cannot be read or created; out is left unchanged
+// so the caller can skip the save. Empty plaintext returns true and clears out.
+bool obfuscateToBase64(const std::string& plaintext, String& out);
 
 // Decode base64 and de-obfuscate back to plaintext.
 // Returns empty string on invalid base64 input; sets *ok to false if decode fails.
-// *legacy is set when the blob was the MAC form and a v2 key is available.
+// *legacy is set from shouldUpgradeStoredForm after a successful decode.
 std::string deobfuscateFromBase64(const char* encoded, bool* ok = nullptr, bool* legacy = nullptr);
 
 // Bounded variant. Rejects decoded output larger than maxDecodedLength before

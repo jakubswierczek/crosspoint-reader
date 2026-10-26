@@ -40,9 +40,12 @@ class LcpDeviceStore : public PersistableStore<LcpDeviceStore> {
   std::string privHex;  // 64 hex chars
 
   static const char* getFilePath() { return "/.crosspoint/lcp_device.json"; }
-  void toJson(JsonDocument& doc) const {
+  bool toJson(JsonDocument& doc) const {
     doc["device_id"] = deviceId;
-    doc["priv_obf"] = obfuscation::obfuscateToBase64(privHex);
+    String privObf;
+    if (!obfuscation::obfuscateToBase64(privHex, privObf)) return false;
+    doc["priv_obf"] = privObf;
+    return true;
   }
   bool fromJson(JsonVariantConst doc) {
     deviceId = doc["device_id"] | "";
