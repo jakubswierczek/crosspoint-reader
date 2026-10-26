@@ -1,5 +1,5 @@
 """
-PlatformIO pre-script: turn on TLS peer verification in the FreeInk SDK copy
+PlatformIO post-script: turn on TLS peer verification in the FreeInk SDK copy
 this build compiles.
 
 SecureClient only verifies a peer when VERIFY_PEER is set. setCACert() alone
@@ -36,17 +36,28 @@ SECURE_NEW_INCLUDES = """#if defined(FREEINK_NET_WOLFSSL)
 #endif
 """
 
-SECURE_OLD_CALLBACK_ANCHOR = "bool isWantIo(const int err) {"
-SECURE_NEW_CALLBACK = """// A cold boot has no wall clock. Signature and hostname are still checked;
+SECURE_OLD_FILE_SCOPE = """#endif
+
+namespace freeink {
+"""
+SECURE_NEW_FILE_SCOPE = """#endif
+
+#if defined(FREEINK_NET_WOLFSSL)
+// C linkage: wolfSSL's verify callback is an extern "C" function pointer.
+// A cold boot has no wall clock. Signature and hostname are still checked.
 // notBefore/notAfter are ignored only until the clock is in 2025 or later.
-int verifyPeer(int preverify, WOLFSSL_X509_STORE_CTX* store) {
+extern "C" int crosspointVerifyPeer(int preverify, WOLFSSL_X509_STORE_CTX* store) {
   if (preverify == 1) return 1;
-  const int err = wolfSSL_X509_STORE_CTX_get_error(store);
-  if (time(nullptr) < 1735689600 && (err == ASN_BEFORE_DATE_E || err == ASN_AFTER_DATE_E)) return 1;
+  if (store != nullptr && time(nullptr) < 1735689600 &&
+      (store->error == ASN_BEFORE_DATE_E || store->error == ASN_AFTER_DATE_E)) {
+    return 1;
+  }
   return 0;
 }
+#endif
 
-bool isWantIo(const int err) {"""
+namespace freeink {
+"""
 
 SECURE_OLD_LOAD = """  if (_insecure) {
     wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, nullptr);
@@ -59,22 +70,14 @@ SECURE_NEW_LOAD = f"""  {MARKER}
   if (_insecure) {{
     wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, nullptr);
   }} else if (_rootCA != nullptr && _rootCA[0] != '\\0') {{
-    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, verifyPeer);
-    int loaded = 0;
-    const char* cursor = _rootCA;
-    while (const char* begin = strstr(cursor, "-----BEGIN CERTIFICATE-----")) {{
-      const char* end = strstr(begin, "-----END CERTIFICATE-----");
-      if (end == nullptr) break;
-      end += sizeof("-----END CERTIFICATE-----") - 1;
-      while (*end == '\\r' || *end == '\\n') ++end;
-      const long pemLen = static_cast<long>(end - begin);
-      if (wolfSSL_CTX_load_verify_buffer(ctx, reinterpret_cast<const unsigned char*>(begin), pemLen,
-                                         WOLFSSL_FILETYPE_PEM) == WOLFSSL_SUCCESS) {{
-        ++loaded;
-      }}
-      cursor = end;
-    }}
-    if (loaded == 0) {{
+    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, crosspointVerifyPeer);
+    // Loading the roots also checks their dates. Skip that only while the
+    // clock is still before 2025; a set clock still rejects an expired root.
+    const word32 loadFlags = time(nullptr) < 1735689600 ? WOLFSSL_LOAD_FLAG_DATE_ERR_OKAY : 0;
+    const int loaded = wolfSSL_CTX_load_verify_buffer_ex(
+        ctx, reinterpret_cast<const unsigned char*>(_rootCA), static_cast<long>(strlen(_rootCA)),
+        WOLFSSL_FILETYPE_PEM, 0, loadFlags);
+    if (loaded != WOLFSSL_SUCCESS) {{
       if (Serial) Serial.printf("[SecureClient] no CA loaded (%s)\\n", label);
       stop();
       return 0;
@@ -114,7 +117,7 @@ def patch_secure(text: str) -> str:
         return text
     for old, new in (
         (SECURE_OLD_INCLUDES, SECURE_NEW_INCLUDES),
-        (SECURE_OLD_CALLBACK_ANCHOR, SECURE_NEW_CALLBACK),
+        (SECURE_OLD_FILE_SCOPE, SECURE_NEW_FILE_SCOPE),
         (SECURE_OLD_LOAD, SECURE_NEW_LOAD),
         (SECURE_OLD_SNI, SECURE_NEW_SNI),
     ):
@@ -150,20 +153,22 @@ def apply_one(path: Path, upstream: str, transform) -> None:
     print(f"Patched TLS verification: {path.relative_to(PROJECT_DIR)}")
 
 
-def main() -> None:
-    # Library install can land after this script on a cold tree. wolfSSL's
-    # pre-script does the same: a missing libdeps directory is the SDK pass.
-    libdeps = PROJECT_DIR / ".pio" / "libdeps"
-    if not libdeps.is_dir():
+def patch_selected(env) -> None:
+    # The SDK-only pass has no application libraries yet.
+    if env.get("ARDUINO_LIB_COMPILE_FLAG") == "Build":
         return
-    secure_files = list(libdeps.glob("*/SecureNet/src/SecureClient.cpp"))
-    opds_files = list(libdeps.glob("*/Opds/src/OpdsImplicitAuth.cpp"))
-    if not secure_files or not opds_files:
-        return
-    for path in secure_files:
-        apply_one(path, SECURE_UPSTREAM, patch_secure)
-    for path in opds_files:
-        apply_one(path, OPDS_UPSTREAM, patch_opds)
+    selected = {}
+    for builder in env.GetLibBuilders():
+        if getattr(builder, "is_dependent", False):
+            selected[builder.name] = builder
+    secure = selected.get("SecureNet")
+    opds = selected.get("Opds")
+    if secure is None or opds is None:
+        raise RuntimeError("TLS verification patch requires SecureNet and Opds")
+    apply_one(Path(secure.path) / "src" / "SecureClient.cpp", SECURE_UPSTREAM, patch_secure)
+    apply_one(Path(opds.path) / "src" / "OpdsImplicitAuth.cpp", OPDS_UPSTREAM, patch_opds)
 
 
-main()
+if "Import" in globals():
+    Import("env")  # noqa: F821 -- supplied by SCons
+    patch_selected(env)  # noqa: F821
