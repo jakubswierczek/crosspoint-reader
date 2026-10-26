@@ -706,6 +706,9 @@ bool ChapterHtmlSlimParser::lastTokenIsPolishSingleLetter() const {
   // A continued opening quote ("„" then "i") still is.
   if (!currentTextBlock->wordContinuesAt(last) || last == 0) return true;
   const std::string_view previous = currentTextBlock->wordAt(last - 1);
+  // "i <em>w</em>" stores "w" attached to the glue space. That space is the
+  // word boundary, so "w" is its own word. "w<em>i</em>" is not: "i" follows "w".
+  if (previous == " ") return true;
   size_t index = 0;
   if (previous.empty()) return false;
   while (index < previous.size()) {

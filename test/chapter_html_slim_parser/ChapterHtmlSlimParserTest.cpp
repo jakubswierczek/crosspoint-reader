@@ -2198,6 +2198,24 @@ TEST_F(ChapterHtmlSlimParserTest, PolishSingleLetterWordStaysWithTheNextWord) {
     EXPECT_EQ(parser.currentTextBlock->wordAt(2), "domu");
     EXPECT_TRUE(parser.currentTextBlock->wordContinuesAt(1));
     EXPECT_FALSE(parser.currentTextBlock->wordContinuesAt(2));
+
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, BlockStyle(), 0);
+    parser.polishGlueArmed = false;
+    parser.depth = 2;
+    ChapterHtmlSlimParser::characterData(&parser, "i ", 2);
+    ChapterHtmlSlimParser::startElement(&parser, "em", nullptr);
+    ChapterHtmlSlimParser::characterData(&parser, "w", 1);
+    ChapterHtmlSlimParser::endElement(&parser, "em");
+    ChapterHtmlSlimParser::characterData(&parser, " domu", 5);
+    if (parser.partWordBufferIndex > 0) parser.flushPartWordBuffer();
+    ASSERT_EQ(parser.currentTextBlock->size(), 5u);
+    EXPECT_EQ(parser.currentTextBlock->wordAt(0), "i");
+    EXPECT_EQ(parser.currentTextBlock->wordAt(1), " ");
+    EXPECT_EQ(parser.currentTextBlock->wordAt(2), "w");
+    EXPECT_EQ(parser.currentTextBlock->wordAt(3), " ");
+    EXPECT_EQ(parser.currentTextBlock->wordAt(4), "domu");
+    EXPECT_TRUE(parser.currentTextBlock->wordContinuesAt(3));
+    EXPECT_TRUE(parser.currentTextBlock->wordContinuesAt(4));
   }
 }
 
