@@ -35,6 +35,7 @@
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
 #include "OpdsServerStore.h"
+#include "PluginRelayPolicy.h"
 #include "ProtectedPaths.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
@@ -1954,8 +1955,13 @@ void CrossPointWebServer::handleRelay() {
   const String plugin = req["plugin"] | "";
   const std::string url = req["url"] | "";
   const std::string method = req["method"] | "GET";
-  if (!safeComponent(plugin) || url.empty()) {
-    server->send(400, "application/json", "{\"error\":\"missing plugin/url\"}");
+  if (!safeComponent(plugin) || PluginLocations::findPluginDir(plugin.c_str()).empty()) {
+    server->send(403, "application/json", "{\"error\":\"plugin not installed\"}");
+    return;
+  }
+  if (!pluginrelay::urlAllowed(url.c_str())) {
+    LOG_ERR("WEB", "Rejected relay URL");
+    server->send(400, "application/json", "{\"error\":\"url not allowed\"}");
     return;
   }
   pluginhttp::Headers headers;
@@ -2197,13 +2203,23 @@ void CrossPointWebServer::handleFetch() {
   if (rejectIfPluginsDisabled()) return;
   JsonDocument req;
   if (!readJsonBody(req)) return;
+  const String plugin = req["plugin"] | "";
   const std::string url = req["url"] | "";
   const std::string dest = req["dest"] | "";
   const size_t requestedOffset = req["offset"] | 0;
   size_t segmentLimit = req["maxBytes"] | 0;
   static constexpr size_t FETCH_MAX_SEGMENT_SIZE = 4 * 1024 * 1024;
   if (segmentLimit > FETCH_MAX_SEGMENT_SIZE) segmentLimit = FETCH_MAX_SEGMENT_SIZE;
-  if (url.empty() || !protectedpaths::isPluginPath(dest)) {
+  if (!safeComponent(plugin) || PluginLocations::findPluginDir(plugin.c_str()).empty()) {
+    server->send(403, "application/json", "{\"error\":\"plugin not installed\"}");
+    return;
+  }
+  if (!pluginrelay::urlAllowed(url.c_str())) {
+    LOG_ERR("WEB", "Rejected fetch URL");
+    server->send(400, "application/json", "{\"error\":\"url not allowed\"}");
+    return;
+  }
+  if (!protectedpaths::isPluginPath(dest)) {
     server->send(400, "application/json", "{\"error\":\"bad url/dest\"}");
     return;
   }
