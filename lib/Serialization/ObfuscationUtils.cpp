@@ -1,15 +1,16 @@
 #include "ObfuscationUtils.h"
 
 #include <Logging.h>
-#include <base64.h>
 #include <esp_mac.h>
 #include <esp_random.h>
 #include <mbedtls/base64.h>
 #include <nvs.h>
 
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
 
 namespace obfuscation {
@@ -82,9 +83,32 @@ bool obfuscateToBase64(const std::string& plaintext, String& out) {
   if (!copyV2Key(v2Key)) return false;
   std::string temp = plaintext;
   xorTransform(temp, v2Key, V2_KEY_LEN);
-  out = V2_PREFIX;
-  out += base64::encode(reinterpret_cast<const uint8_t*>(temp.data()), temp.size());
-  return true;
+
+  // One block holds the prefix and the base64. Assign out only after that
+  // block is complete, so a failed allocation cannot persist a bare "v2.".
+  const auto* src = reinterpret_cast<const unsigned char*>(temp.data());
+  size_t encodedLen = 0;
+  const int query = mbedtls_base64_encode(nullptr, 0, &encodedLen, src, temp.size());
+  if (query != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL || encodedLen < 2) return false;
+
+  struct FreeDeleter {
+    void operator()(char* p) const { std::free(p); }
+  };
+  const size_t bytes = V2_PREFIX_LEN + encodedLen;
+  std::unique_ptr<char, FreeDeleter> buffer(static_cast<char*>(std::malloc(bytes)));
+  if (!buffer) return false;
+  memcpy(buffer.get(), V2_PREFIX, V2_PREFIX_LEN);
+  size_t written = 0;
+  const int ret = mbedtls_base64_encode(reinterpret_cast<unsigned char*>(buffer.get() + V2_PREFIX_LEN), encodedLen,
+                                        &written, src, temp.size());
+  if (ret != 0 || written + 1 != encodedLen) return false;
+
+  const size_t expect = V2_PREFIX_LEN + written;
+  String full(buffer.get());
+  buffer.reset();
+  if (full.length() != expect) return false;
+  out = full;
+  return out.length() == expect;
 }
 
 std::string deobfuscateFromBase64(const char* encoded, bool* ok, bool* legacy) {

@@ -24,8 +24,9 @@ void xorTransform(std::string& data);
 void xorTransform(std::string& data, const uint8_t* key, size_t keyLen);
 
 // Obfuscate a plaintext string for JSON storage. Writes only the "v2." form.
-// Returns false when the NVS key cannot be read or created; out is left unchanged
-// so the caller can skip the save. Empty plaintext returns true and clears out.
+// Returns false when the NVS key is unavailable or the blob cannot be allocated.
+// The caller must not save out in that case. Empty plaintext returns true and
+// clears out.
 bool obfuscateToBase64(const std::string& plaintext, String& out);
 
 // Decode base64 and de-obfuscate back to plaintext.
