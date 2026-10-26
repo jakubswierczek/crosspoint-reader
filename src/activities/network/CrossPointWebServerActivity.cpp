@@ -469,6 +469,7 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
 void CrossPointWebServerActivity::renderServerRunning() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
                  isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER), nullptr);
@@ -535,11 +536,15 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     startY += height10 + metrics.verticalSpacing * 2;
 
     // Show QR code for URL. The query signs the browser in; the text below stays readable.
+    // Shrink on a short panel so the modules, including the finders, stay on the glass.
     std::string webLabel = "http://" + connectedIP + "/";
     std::string webInfo = webLabel + "?k=" + accessCode;
-    const Rect qrBounds((pageWidth - QR_CODE_WIDTH) / 2, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
+    int qrSize = QR_CODE_WIDTH;
+    if (startY + qrSize > pageHeight) qrSize = pageHeight - startY;
+    if (qrSize < 132) qrSize = 132;
+    const Rect qrBounds((pageWidth - qrSize) / 2, startY, qrSize, qrSize);
     QrUtils::drawQrCode(renderer, qrBounds, webInfo);
-    startY += QR_CODE_HEIGHT + metrics.verticalSpacing * 2;
+    startY += qrSize + metrics.verticalSpacing * 2;
 
     // Show web server URL prominently
     renderer.drawCenteredText(UI_10_FONT_ID, startY, webLabel.c_str(), true);
