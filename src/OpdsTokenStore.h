@@ -8,7 +8,7 @@
 /**
  * OAuth token state for one OPDS server, keyed by server URL.
  * accessToken/refreshToken are bearer credentials, stored XOR-obfuscated with
- * the device key (same protection as the server password). refreshUrl is the
+ * the NVS key (same protection as the server password). refreshUrl is the
  * token endpoint discovered from the authentication document; it lets an
  * expired access token be refreshed without a full re-login.
  */

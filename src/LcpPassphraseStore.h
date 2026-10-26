@@ -9,7 +9,7 @@
  * Per-provider LCP passphrase hashes (hex sha256(passphrase)), keyed by the
  * license's `provider` URI, so borrowing another book from the same library
  * skips the passphrase prompt: the saved hash is tried against /unlock first
- * and only a 403 re-prompts. Stored XOR-obfuscated with the device key, the
+ * and only a 403 re-prompts. Stored XOR-obfuscated with the NVS key, the
  * same protection as OPDS bearer tokens — the hash is the basic-profile user
  * key, so it is never written in the clear.
  */

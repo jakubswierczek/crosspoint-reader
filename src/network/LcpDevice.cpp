@@ -48,7 +48,9 @@ class LcpDeviceStore : public PersistableStore<LcpDeviceStore> {
     deviceId = doc["device_id"] | "";
     bool ok = false;
     bool tooLong = false;
-    privHex = obfuscation::deobfuscateFromBase64(doc["priv_obf"] | "", 64, &ok, &tooLong);
+    bool legacy = false;
+    privHex = obfuscation::deobfuscateFromBase64(doc["priv_obf"] | "", 64, &ok, &tooLong, &legacy);
+    if (legacy) requestResave();
     return true;
   }
   bool valid() const { return !deviceId.empty() && privHex.size() == 64; }

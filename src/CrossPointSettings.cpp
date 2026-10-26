@@ -150,8 +150,10 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
         snprintf(obfKey, sizeof(obfKey), "%s_obf", info.key);
         bool ok = false;
         bool tooLong = false;
+        bool legacy = false;
         const std::string decoded =
-            obfuscation::deobfuscateFromBase64(doc[obfKey] | "", info.stringMaxLen - 1, &ok, &tooLong);
+            obfuscation::deobfuscateFromBase64(doc[obfKey] | "", info.stringMaxLen - 1, &ok, &tooLong, &legacy);
+        if (legacy) needsResave = true;
         if (tooLong) {
           LOG_ERR("CPS", "Oversized obfuscated value for key '%s'", info.key);
           needsResave = true;

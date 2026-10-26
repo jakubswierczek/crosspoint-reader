@@ -3,16 +3,48 @@
 #include <Logging.h>
 #include <base64.h>
 #include <esp_mac.h>
+#include <esp_random.h>
 #include <mbedtls/base64.h>
+#include <nvs.h>
 
 #include <array>
 #include <cstring>
 #include <limits>
+#include <mutex>
 
 namespace obfuscation {
 
 namespace {
 constexpr size_t HW_KEY_LEN = 6;
+
+// Random key in NVS. A failed read is not cached, so the next save can retry.
+// The key stays in this static for the boot; it is not written to the SD card.
+bool copyV2Key(uint8_t (&out)[V2_KEY_LEN]) {
+  static uint8_t key[V2_KEY_LEN];
+  static bool loaded = false;
+  static std::mutex lock;
+  std::lock_guard<std::mutex> guard(lock);
+  if (!loaded) {
+    nvs_handle_t handle;
+    if (nvs_open("obfkey", NVS_READWRITE, &handle) == ESP_OK) {
+      size_t stored = sizeof(key);
+      const esp_err_t err = nvs_get_blob(handle, "k", key, &stored);
+      if (err == ESP_OK) {
+        loaded = stored == sizeof(key);
+      } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        esp_fill_random(key, sizeof(key));
+        loaded = nvs_set_blob(handle, "k", key, sizeof(key)) == ESP_OK && nvs_commit(handle) == ESP_OK;
+      }
+      nvs_close(handle);
+    }
+    if (!loaded) {
+      LOG_ERR("OBF", "Obfuscation key unavailable");
+      return false;
+    }
+  }
+  memcpy(out, key, sizeof(key));
+  return true;
+}
 
 const uint8_t* getHwKey() {
   // Function-local static initialization is synchronized by C++, including
@@ -44,25 +76,49 @@ void xorTransform(std::string& data, const uint8_t* key, size_t keyLen) {
 String obfuscateToBase64(const std::string& plaintext) {
   if (plaintext.empty()) return "";
   std::string temp = plaintext;
-  xorTransform(temp);
-  return base64::encode(reinterpret_cast<const uint8_t*>(temp.data()), temp.size());
+  uint8_t v2Key[V2_KEY_LEN];
+  const bool v2 = copyV2Key(v2Key);
+  if (v2) {
+    xorTransform(temp, v2Key, V2_KEY_LEN);
+  } else {
+    xorTransform(temp);
+  }
+  String encoded = base64::encode(reinterpret_cast<const uint8_t*>(temp.data()), temp.size());
+  if (!v2) return encoded;
+  String prefixed("v2.");
+  prefixed += encoded;
+  return prefixed;
 }
 
-std::string deobfuscateFromBase64(const char* encoded, bool* ok) {
-  return deobfuscateFromBase64(encoded, std::numeric_limits<size_t>::max(), ok, nullptr);
+std::string deobfuscateFromBase64(const char* encoded, bool* ok, bool* legacy) {
+  return deobfuscateFromBase64(encoded, std::numeric_limits<size_t>::max(), ok, nullptr, legacy);
 }
 
-std::string deobfuscateFromBase64(const char* encoded, const size_t maxDecodedLength, bool* ok, bool* tooLong) {
+std::string deobfuscateFromBase64(const char* encoded, const size_t maxDecodedLength, bool* ok, bool* tooLong,
+                                  bool* legacy) {
   if (tooLong) *tooLong = false;
+  if (legacy) *legacy = false;
   if (encoded == nullptr || encoded[0] == '\0') {
     if (ok) *ok = false;
     return "";
   }
+  uint8_t v2Key[V2_KEY_LEN];
+  const bool haveV2 = copyV2Key(v2Key);
+  const char* payload = encoded;
+  bool useV2 = false;
+  if (isV2Blob(encoded)) {
+    if (!haveV2) {
+      if (ok) *ok = false;
+      return "";
+    }
+    payload = encoded + V2_PREFIX_LEN;
+    useV2 = true;
+  }
   if (ok) *ok = true;
-  size_t encodedLen = strlen(encoded);
+  size_t encodedLen = strlen(payload);
   // First call: get required output buffer size
   size_t decodedLen = 0;
-  int ret = mbedtls_base64_decode(nullptr, 0, &decodedLen, reinterpret_cast<const unsigned char*>(encoded), encodedLen);
+  int ret = mbedtls_base64_decode(nullptr, 0, &decodedLen, reinterpret_cast<const unsigned char*>(payload), encodedLen);
   if (ret != 0 && ret != MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
     LOG_ERR("OBF", "Base64 decode size query failed (ret=%d)", ret);
     if (ok) *ok = false;
@@ -75,14 +131,19 @@ std::string deobfuscateFromBase64(const char* encoded, const size_t maxDecodedLe
   }
   std::string result(decodedLen, '\0');
   ret = mbedtls_base64_decode(reinterpret_cast<unsigned char*>(&result[0]), decodedLen, &decodedLen,
-                              reinterpret_cast<const unsigned char*>(encoded), encodedLen);
+                              reinterpret_cast<const unsigned char*>(payload), encodedLen);
   if (ret != 0) {
     LOG_ERR("OBF", "Base64 decode failed (ret=%d)", ret);
     if (ok) *ok = false;
     return "";
   }
   result.resize(decodedLen);
-  xorTransform(result);
+  if (useV2) {
+    xorTransform(result, v2Key, V2_KEY_LEN);
+  } else {
+    xorTransform(result);
+    if (legacy && haveV2) *legacy = true;
+  }
   return result;
 }
 

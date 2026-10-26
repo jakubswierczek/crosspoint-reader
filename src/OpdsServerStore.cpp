@@ -43,7 +43,10 @@ bool OpdsServerStore::fromJson(JsonVariantConst doc) {
     for (JsonObjectConst headerObj : obj["headers"].as<JsonArrayConst>()) {
       if (headerIndex >= OpdsServer::MAX_CUSTOM_HEADERS) break;
       server.customHeaders[headerIndex].name = headerObj["name"] | "";
-      server.customHeaders[headerIndex].value = obfuscation::deobfuscateFromBase64(headerObj["value_obf"] | "");
+      bool legacy = false;
+      server.customHeaders[headerIndex].value =
+          obfuscation::deobfuscateFromBase64(headerObj["value_obf"] | "", nullptr, &legacy);
+      if (legacy) needsResave = true;
       headerIndex++;
     }
 

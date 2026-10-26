@@ -90,7 +90,10 @@ bool KOReaderCredentialStore::fromJson(JsonVariantConst doc) {
   for (JsonObjectConst headerObj : doc["headers"].as<JsonArrayConst>()) {
     if (headerIndex >= MAX_CUSTOM_HEADERS) break;
     customHeaders[headerIndex].name = headerObj["name"] | "";
-    customHeaders[headerIndex].value = obfuscation::deobfuscateFromBase64(headerObj["value_obf"] | "");
+    bool legacy = false;
+    customHeaders[headerIndex].value =
+        obfuscation::deobfuscateFromBase64(headerObj["value_obf"] | "", nullptr, &legacy);
+    if (legacy) needsResave = true;
     headerIndex++;
   }
 
