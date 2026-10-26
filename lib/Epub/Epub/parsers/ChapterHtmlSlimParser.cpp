@@ -18,13 +18,13 @@
 
 #include "Epub.h"
 #include "Epub/Page.h"
+#include "Epub/PolishLineGlue.h"
 #include "Epub/VisibleTextUtils.h"
 #include "Epub/converters/ImageDecoderFactory.h"
 #include "Epub/converters/ImageDimsProbe.h"
 #include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "Epub/htmlEntities.h"
-#include "PolishLineGlue.h"
-#include "hyphenation/Hyphenator.h"
+#include "Epub/hyphenation/Hyphenator.h"
 
 // Minimum file size (in bytes) to show indexing popup - smaller chapters don't benefit from it
 constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
