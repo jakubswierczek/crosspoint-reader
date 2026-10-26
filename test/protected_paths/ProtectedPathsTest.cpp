@@ -89,6 +89,10 @@ TEST(ProtectedPaths, PluginSecretsAreDeniedOnReadButWritableByPlugins) {
   EXPECT_FALSE(isNetworkDeniedPath("/Books/my.key.epub"));
   EXPECT_FALSE(isWebDavBlocked("/Books/my.key.epub"));
   EXPECT_TRUE(isNetworkSecretName("book.epub.key.tmp"));
+  EXPECT_TRUE(isNetworkSecretName("VERYLO~1.TMP"));
+  EXPECT_TRUE(isNetworkDeniedPath("/Books/Novels/VERYLO~1.TMP"));
+  EXPECT_TRUE(isNetworkSecretName("AEPUBKEY.TMP"));
+  EXPECT_FALSE(isNetworkSecretName("notes.bak"));
 }
 
 TEST(ProtectedPaths, SpacedParentStillReachesTheCredentialStore) {

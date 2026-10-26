@@ -128,10 +128,12 @@ inline bool isSecretShortAlias(const char* first, const char* last) {
     if (*p == '.') dot = p;
   }
   const char* ext = dot ? dot + 1 : last;
-  if (segmentEquals(ext, last, "key")) return true;
-  if (!segmentEquals(ext, last, "jso") && !segmentEquals(ext, last, "tmp") && !segmentEquals(ext, last, "bak")) {
-    return false;
+  // .key, and the .tmp / .bak a key is staged or copied as. The stem is the
+  // book title, so it will not match the credential-store list below.
+  if (segmentEquals(ext, last, "key") || segmentEquals(ext, last, "tmp") || segmentEquals(ext, last, "bak")) {
+    return true;
   }
+  if (!segmentEquals(ext, last, "jso")) return false;
   const char* tilde = static_cast<const char*>(memchr(first, '~', static_cast<size_t>(last - first)));
   const size_t prefixLen = static_cast<size_t>(tilde - first);
   // Real lossy aliases keep at least four characters of these stems.
@@ -166,6 +168,20 @@ inline bool isNetworkSecretName(const char* name) {
   // "my.key.epub" is a book name and stays transferable.
   if (segmentEndsWith(first, last, ".key")) return true;
   if (segmentEndsWith(first, last, ".key.bak") || segmentEndsWith(first, last, ".key.tmp")) return true;
+  // A short name with no tilde: "a.epub.key.tmp" becomes "AEPUBKEY.TMP".
+  const char* dot = nullptr;
+  for (const char* p = first; p < last; ++p) {
+    if (*p == '.') dot = p;
+  }
+  if (memchr(first, '~', static_cast<size_t>(last - first)) == nullptr && dot != nullptr) {
+    const size_t base = static_cast<size_t>(dot - first);
+    const size_t extLen = static_cast<size_t>(last - dot - 1);
+    if (base >= 3 && base <= 8 && extLen <= 3 &&
+        (segmentEquals(dot + 1, last, "tmp") || segmentEquals(dot + 1, last, "bak")) &&
+        strncasecmp(dot - 3, "key", 3) == 0) {
+      return true;
+    }
+  }
   return false;
 }
 
