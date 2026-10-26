@@ -150,7 +150,7 @@ def apply_one(path: Path, upstream: str, transform) -> None:
             "Update the patch before building."
         )
     path.write_text(transform(text))
-    print(f"Patched TLS verification: {path.relative_to(PROJECT_DIR)}")
+    print(f"Patched TLS verification: {path.name}")
 
 
 def patch_selected(env) -> None:
