@@ -95,6 +95,9 @@ class PolishTranslationTest(unittest.TestCase):
         self.assertEqual(self.polish["STR_LIBRARY_GROUP_POSITION"], "grupy: %d/%d")
         self.assertEqual(self.polish["STR_OPDS_COPIES"], "dostępne: %d z %d")
         self.assertEqual(self.polish["STR_ITEMS_REMOVED"], "usunięto")
+        # After the count, and also the whole BMP failure popup. A past form
+        # with no noun stays grammatical for 1, 2, and 5.
+        self.assertEqual(self.polish["STR_FAILED_LOWER"], "nie udało się")
         self.assertEqual(self.polish["STR_OPDS_HOLDS"], "%d w kolejce")
         self.assertEqual(self.polish["STR_PAGES_SEPARATOR"], " str.  |  ")
 
