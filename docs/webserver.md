@@ -15,8 +15,13 @@ The web server is available while the device is in **File Transfer** or
 - Upload and delete `.cpfont` SD-card font families
 - Accept WebDAV clients and Calibre wireless uploads
 
-The server does not require authentication. Use it only on trusted private
-networks or in hotspot mode when you control who is connected.
+The file pages load without a password. Uploads, downloads, settings, WebDAV,
+and the other APIs require the access code shown on the File Transfer or
+Calibre screen. Scan the on-screen QR code to open the page already signed in,
+or type the code when the browser asks. A phone or computer on the same network
+can also send `Authorization: Bearer <code>` (or HTTP Basic, with the code as
+the password) on each request. The code is not included in `/api/status` or in
+UDP discovery.
 
 ## Starting File Transfer
 
@@ -141,8 +146,8 @@ Endpoint details are documented in [webserver-endpoints.md](./webserver-endpoint
 
 - The HTTP server runs on port 80.
 - The WebSocket upload server runs on port 81.
-- There is no authentication.
-- Anyone on the same network can access the web interface while it is running.
+- The reader shows an access code. Uploads, downloads, settings, WebDAV, and the other APIs require it. The file pages and `/api/status` load without it.
+- Anyone who can see that code can use the web interface while it is running. See [webserver-endpoints.md](./webserver-endpoints.md).
 - The server stops when you exit File Transfer or Calibre Wireless mode.
 - Hotspot mode creates an open network for connectivity fallback; disconnect when done.
 
