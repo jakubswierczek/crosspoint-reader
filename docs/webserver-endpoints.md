@@ -11,6 +11,51 @@ available while CrossPoint Reader is in File Transfer or Calibre Wireless mode.
 Examples use `crosspoint.local`. If mDNS does not resolve on your network, use
 the IP address shown on the device screen.
 
+## Authentication
+
+The access code is an 8-character value stored on the device and shown on the
+File Transfer and Calibre screens. These reads do not need it: `GET` or `HEAD`
+of `/`, `/files`, `/settings`, `/fonts`, `/plugins-run`, `/api/status`,
+`/assets/web.css`, `/assets/icons.svg`, `/assets/crosspoint-icon.svg`, and
+`/js/jszip.min.js`, plus `OPTIONS` (browser preflight). A path under `/js/` or
+`/assets/` that is not one of those files is not public. Every other request
+does, including download, upload, settings changes, OPDS and Wi-Fi changes,
+plugin routes, plugin jobs, and WebDAV.
+
+Send one of:
+
+- `Authorization: Bearer <code>`
+- `Authorization: Basic ...` where the password is the code and the username is ignored
+- Cookie `cp=<code>` (set when a browser opens `/?k=<code>`; the device redirects to the same path without the query)
+- Query `k=<code>`. On `GET` and `HEAD`, a valid `k` and no `Authorization` header answers `302` to the same path with the query removed and sets cookie `cp`. `GET /download?path=/Books/MyBook.epub&k=<code>` therefore comes back as `Location: /download`, and `path` is gone. `POST`, WebDAV `PUT`, and the other protected methods are served on that request and also set the cookie. `OPTIONS` stays public: a `k` on it does not set the cookie, and that presented code is counted as a wrong guess.
+
+A browser page that gets `401` can prompt for the code and reload with `?k=`.
+The WebSocket upload URL is `ws://<host>:81/?k=<code>`. A cookie or
+`Authorization` header is not accepted on that socket. The official Calibre
+wireless plugin has to send the query; the code is on the Calibre screen.
+The stock plugin does not, so Calibre wireless fails until the plugin is updated.
+
+The `Host` value that works is the station IP when the reader has joined a
+network, the hotspot IP when the access point is up, and `crosspoint.local` in
+either case. Comparison ignores case and a trailing `:80`. In hotspot mode,
+the shell reads (`GET`/`HEAD` of the public pages, plus every `OPTIONS`) skip
+that check. Every other request with a different `Host` is `403`, including
+one that has the right code.
+
+Eight wrong presented codes arm a device-wide 30-second lockout. During that
+window every non-public HTTP request is `429`, including a correct code. Shell
+reads with no `k` still succeed. A wrong `k` on a shell page counts toward
+the lockout. A correct `k` clears it and answers `302`. Once the lockout is
+already armed, a shell request that presents `k` is `429`. The WebSocket path
+does not use this counter.
+
+A cookie-authenticated request needs `Origin: http://` plus that same host for
+every method except `GET`, `HEAD`, and `OPTIONS`, including WebDAV `PROPFIND`.
+A missing or different origin is `403`. Bearer and Basic do not need `Origin`.
+
+Examples below that are not `GET /api/status` send `Authorization: Bearer CODE`.
+Replace `CODE` with the value on the reader.
+
 ## HTTP Pages
 
 | Method | Path | Purpose |
@@ -67,7 +112,7 @@ Response:
 Lists files and folders under a directory.
 
 ```bash
-curl "http://crosspoint.local/api/files?path=/Books"
+curl -H "Authorization: Bearer CODE" "http://crosspoint.local/api/files?path=/Books"
 ```
 
 Query parameters:
@@ -89,15 +134,24 @@ Hidden dotfiles are omitted unless the device setting `showHiddenFiles` is
 enabled. `System Volume Information` and `XTCache` are always hidden/protected.
 
 The saved-credential stores (`/.crosspoint/wifi.json`, `opds.json`,
-`koreader.json`) can never be downloaded, uploaded, renamed, moved, deleted or
-written by a plugin over the network, however the path is spelled.
+`koreader.json`, `opds_tokens.json`, `lcp_passphrases.json`, and
+`lcp_device.json`) can never be downloaded, uploaded, renamed, moved, deleted,
+or written by a plugin over the network, however the path is spelled. The same
+rule applies to WebDAV, including directory listings.
+
+Plugin secret files (`token.json`, `secret.json`, `credentials.json`), a name
+that continues after that basename (`token.json.bak`), `*.key` files, and a
+later suffix such as `book.epub.key.bak` are not listed, downloaded, uploaded,
+renamed, moved, or deleted, including over WebSocket. A plugin still writes
+`token.json` with `POST /api/plugin-fs`. Book content keys are stored with
+`POST /api/book-key`, not by downloading the `.key` file.
 
 ### `GET /download`
 
 Downloads a file from the SD card.
 
 ```bash
-curl -OJ "http://crosspoint.local/download?path=/Books/MyBook.epub"
+curl -H "Authorization: Bearer CODE" -OJ "http://crosspoint.local/download?path=/Books/MyBook.epub"
 ```
 
 Query parameters:
@@ -106,8 +160,8 @@ Query parameters:
 |-----------|----------|-------------|
 | `path` | Yes | File path to download |
 
-Protected dotfiles, `System Volume Information`, `XTCache`, and the credential
-stores cannot be downloaded. EPUB files are served as `application/epub+zip`; other files use
+Protected dotfiles, `System Volume Information`, `XTCache`, the credential
+stores, and the plugin secret names above cannot be downloaded. EPUB files are served as `application/epub+zip`; other files use
 `application/octet-stream`.
 
 ### `POST /upload`
@@ -115,7 +169,7 @@ stores cannot be downloaded. EPUB files are served as `application/epub+zip`; ot
 Uploads a file with HTTP multipart form data.
 
 ```bash
-curl -X POST -F "file=@mybook.epub" "http://crosspoint.local/upload?path=/Books"
+curl -H "Authorization: Bearer CODE" -X POST -F "file=@mybook.epub" "http://crosspoint.local/upload?path=/Books"
 ```
 
 Query parameters:
@@ -145,7 +199,7 @@ Notes:
 Creates a folder.
 
 ```bash
-curl -X POST -d "name=NewFolder&path=/" http://crosspoint.local/mkdir
+curl -H "Authorization: Bearer CODE" -X POST -d "name=NewFolder&path=/" http://crosspoint.local/mkdir
 ```
 
 Form parameters:
@@ -160,7 +214,7 @@ Form parameters:
 Renames a file.
 
 ```bash
-curl -X POST -d "path=/Books/old.epub&name=new.epub" http://crosspoint.local/rename
+curl -H "Authorization: Bearer CODE" -X POST -d "path=/Books/old.epub&name=new.epub" http://crosspoint.local/rename
 ```
 
 Form parameters:
@@ -178,7 +232,7 @@ cleared before the rename.
 Moves a file into an existing folder.
 
 ```bash
-curl -X POST -d "path=/Books/mybook.epub&dest=/Read" http://crosspoint.local/move
+curl -H "Authorization: Bearer CODE" -X POST -d "path=/Books/mybook.epub&dest=/Read" http://crosspoint.local/move
 ```
 
 Form parameters:
@@ -196,8 +250,8 @@ cleared before the move.
 Deletes one or more files or empty folders.
 
 ```bash
-curl -X POST -d "path=/Books/mybook.epub" http://crosspoint.local/delete
-curl -X POST -d 'paths=["/Books/old.epub","/OldFolder"]' http://crosspoint.local/delete
+curl -H "Authorization: Bearer CODE" -X POST -d "path=/Books/mybook.epub" http://crosspoint.local/delete
+curl -H "Authorization: Bearer CODE" -X POST -d 'paths=["/Books/old.epub","/OldFolder"]' http://crosspoint.local/delete
 ```
 
 Form parameters:
@@ -207,8 +261,9 @@ Form parameters:
 | `path` | Yes, unless `paths` is provided | Single path to delete |
 | `paths` | Yes, unless `path` is provided | JSON array of paths to delete |
 
-`System Volume Information`, `XTCache` and the saved-credential stores cannot be
-deleted. Hidden items (names that start with `.`) can be deleted. Non-empty
+`System Volume Information`, `XTCache`, the saved-credential stores, and the
+plugin secret names above cannot be deleted. Hidden items (names that start
+with `.`) can be deleted. Non-empty
 folders are rejected. EPUB cache data for deleted files is cleared.
 
 ## Settings API
@@ -219,7 +274,7 @@ Returns a streamed JSON array of editable settings. Each item contains common
 fields plus type-specific fields.
 
 ```bash
-curl http://crosspoint.local/api/settings
+curl -H "Authorization: Bearer CODE" http://crosspoint.local/api/settings
 ```
 
 Example item:
@@ -257,7 +312,7 @@ The font-family setting includes SD-card font families when they are installed.
 Applies a partial settings update from a JSON object.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"fontSize":2,"showHiddenFiles":1}' \
   http://crosspoint.local/api/settings
@@ -278,7 +333,7 @@ these families appear with `sizes: [0]`. The `0` means that the font file has
 no fixed point size; the reader offers 12, 14, 16, and 18 pt.
 
 ```bash
-curl http://crosspoint.local/api/fonts
+curl -H "Authorization: Bearer CODE" http://crosspoint.local/api/fonts
 ```
 
 Response:
@@ -303,7 +358,7 @@ Response:
 Uploads one `.cpfont` file into a family folder.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -F "family=Literata" \
   -F "file=@Literata_12.cpfont" \
   http://crosspoint.local/api/fonts/upload
@@ -326,7 +381,7 @@ This endpoint removes family subfolders. To remove a loose TTF/OTF/TTC file
 from a font root, delete the file from the SD card instead.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"family":"Literata"}' \
   http://crosspoint.local/api/fonts/delete
@@ -345,7 +400,7 @@ Successful response:
 Lists saved OPDS servers. Passwords are never returned.
 
 ```bash
-curl http://crosspoint.local/api/opds
+curl -H "Authorization: Bearer CODE" http://crosspoint.local/api/opds
 ```
 
 Response:
@@ -368,7 +423,7 @@ Adds or updates an OPDS server. Include `index` to update an existing entry.
 If `password` is omitted during an update, the existing password is preserved.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"name":"My Catalog","url":"http://calibre.local:8080/opds","username":"reader","password":"secret"}' \
   http://crosspoint.local/api/opds
@@ -379,7 +434,7 @@ curl -X POST \
 Deletes an OPDS server by index.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"index":0}' \
   http://crosspoint.local/api/opds/delete
@@ -392,7 +447,7 @@ curl -X POST \
 Lists saved Wi-Fi networks. Passwords are never returned.
 
 ```bash
-curl http://crosspoint.local/api/wifi
+curl -H "Authorization: Bearer CODE" http://crosspoint.local/api/wifi
 ```
 
 Response:
@@ -415,7 +470,7 @@ entry. If `password` is omitted during an update, the existing password is
 preserved.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"ssid":"HomeWiFi","password":"secret"}' \
   http://crosspoint.local/api/wifi
@@ -426,7 +481,7 @@ curl -X POST \
 Deletes a saved Wi-Fi network by index.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"index":0}' \
   http://crosspoint.local/api/wifi/delete
@@ -442,7 +497,7 @@ Calibre plugin workflows.
 Connection:
 
 ```text
-ws://crosspoint.local:81/
+ws://crosspoint.local:81/?k=CODE
 ```
 
 Protocol:
@@ -468,6 +523,7 @@ Error messages include:
 
 | Message | Cause |
 |---------|-------|
+| `ERROR:Unauthorized` | The handshake URL had no matching `k` query. The socket then closes. |
 | `ERROR:Upload already in progress` | A second upload was started before the first completed |
 | `ERROR:Invalid START format` | Malformed START message or invalid size token |
 | `ERROR:Failed to create file` | Destination file could not be opened |
@@ -490,7 +546,10 @@ OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, MKCOL, MOVE, COPY, LOCK, UNLOCK
 Notes:
 
 - `PUT` writes to a temporary `.davtmp` file first, then renames it into place.
-- Protected paths are rejected.
+- Protected paths are rejected. WebDAV uses the same path check as the file
+  API: folded case, trimmed spaces, `..`, and 8.3 short names. Any path segment
+  that starts with `.`, `System Volume Information`, `XTCache`, a credential
+  store, or a plugin secret is not listed or transferred.
 - `LOCK` and `UNLOCK` are accepted for client compatibility only. The server
   does not implement full WebDAV Class 2 locking semantics such as persistent
   locks or lock discovery.
@@ -516,7 +575,7 @@ The final field is the WebSocket upload port.
 
 ### Access Point Mode (AP)
 
-- Device creates an open hotspot named `CrossPoint-Reader`.
+- Device creates a WPA2 hotspot named `CrossPoint-Reader`. The password is shown only on the reader, next to the Wi-Fi QR code, and is not saved.
 - The device shows a Wi-Fi QR code and URL QR code.
 - The fallback IP is typically `192.168.4.1`.
 - `/api/status` returns `"mode": "AP"` and `"rssi": 0`.
@@ -543,8 +602,10 @@ Installed plugins that ship a `plugin.js`:
 ### `GET /plugin?name=<plugin>&file=<file>`
 
 Serves one file from the plugin's folder (first root holding that name). Both
-parameters must be single path components (no `/`, `\`, or `..`); 404 when
-the plugin, file, or a directory is requested.
+parameters must be single path components (no `/`, `\`, or `..`). A secret
+basename (`token.json`, `secret.json`, `credentials.json`, a dotted sibling
+such as `token.json.bak`, or `*.key`) is 403. 404 when the plugin, file, or a
+directory is requested.
 
 ### `POST /api/relay`
 
@@ -558,9 +619,15 @@ to CORS). Body: `{"plugin":"<name>","method":"GET","url":"https://...","headers"
 - **Redirects** are not followed: a 3xx comes back with its `location` header.
 - **Limits:** the upstream body is capped at 32KB; larger payloads belong on
   `/api/fetch`.
-- **Errors:** `400 {"error":"missing plugin/url"}`; `502 {"error":"relay failed; ..."}`
-  for a transport failure, a truncated body, a body over the cap, or low memory
-  (the device log names which).
+- `plugin` must name an installed plugin. `url` must be `http` or `https`,
+  without a username or password in the URL. Loopback, the whole
+  `0.0.0.0/8` block, the IPv6 unspecified address (`::`), and link-local
+  addresses (`169.254.0.0/16`, `fe80::/10`) are refused. A private LAN address
+  is still allowed. The check looks at the URL text.
+- **Errors:** `403 {"error":"plugin not installed"}` when the name is missing
+  or not installed; `400 {"error":"url not allowed"}` when the URL is refused;
+  `502 {"error":"relay failed; ..."}` for a transport failure, a truncated
+  body, a body over the cap, or low memory (the device log names which).
 
 ### `POST /api/crypto`
 
@@ -598,7 +665,11 @@ be edited. The reader enforces `expires` when the book opens.
 Downloads a URL straight to SD, so a large body never passes through the
 browser. Body: `{"plugin":"<name>","url":"...","dest":"/abs/path","headers":{...},"offset":0,"maxBytes":0}`.
 
-- `dest` must be absolute with no `..`; missing parent folders are created.
+- `plugin` must name an installed plugin, same rule as `/api/relay`.
+- `url` follows the same `http`/`https` rule as `/api/relay`. A redirect target
+  is not checked again (at most five hops).
+- `dest` must be absolute with no `..` and must not be a credential store;
+  missing parent folders are created.
 - The transfer is staged in `<dest>.part` and replaces `dest` only when the
   whole body has arrived, so a failed update keeps the previous file.
 - Installing a book file (`.epub`, `.txt`, `.md`, `.xtc`) marks the Library
@@ -618,7 +689,8 @@ browser. Body: `{"plugin":"<name>","url":"...","dest":"/abs/path","headers":{...
 - **Result:** `{"status":200,"bytes":N,"complete":true,"total":N}` (`total`
   when the server reported a size). `error` is set to `transport failure`,
   `http status`, or `sd write failed` when the file was not installed.
-- **Errors:** `400 {"error":"bad url/dest"}`; `409 {"error":"offset mismatch","bytes":N}`
+- **Errors:** `403 {"error":"plugin not installed"}`; `400 {"error":"url not allowed"}`
+  or `400 {"error":"bad url/dest"}`; `409 {"error":"offset mismatch","bytes":N}`
   when `offset` does not match the `.part` size; `502 {"error":"sd write failed" |
   "range unsupported" | "download truncated","bytes":N,"complete":false}`.
 
@@ -647,7 +719,7 @@ stores opaque `{plugin, action, args}` blobs (fixed 6-slot pool; args/result
 ### `POST /api/plugin-jobs`
 
 ```bash
-curl -X POST http://crosspoint.local/api/plugin-jobs \
+curl -H "Authorization: Bearer CODE" -X POST http://crosspoint.local/api/plugin-jobs \
   -d '{"plugin":"<name>","action":"<action>","args":{"path":"/Books/somefile"}}'
 # -> {"id":3}         (503 {"error":"job queue full"} when all slots busy)
 ```
@@ -667,7 +739,7 @@ executor re-claimed the job) gets `409 {"error":"stale claim"}` and changes noth
 ### `GET /api/plugin-jobs/status?id=<n>`
 
 ```bash
-curl "http://crosspoint.local/api/plugin-jobs/status?id=3"
+curl -H "Authorization: Bearer CODE" "http://crosspoint.local/api/plugin-jobs/status?id=3"
 # -> {"id":3,"state":"done","result":{"title":"...","dest":"/Books/Book.epub"}}
 ```
 

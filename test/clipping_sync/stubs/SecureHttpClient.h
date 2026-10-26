@@ -18,6 +18,7 @@ namespace freeink {
 class SecureHttpClient {
  public:
   void setInsecure() {}
+  void setCACert(const char*) {}
   bool begin(const std::string& url) {
     url_ = url;
     return true;

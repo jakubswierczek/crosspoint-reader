@@ -38,17 +38,25 @@ class LcpDeviceStore : public PersistableStore<LcpDeviceStore> {
  public:
   std::string deviceId;
   std::string privHex;  // 64 hex chars
+  bool undecodablePriv = false;
 
   static const char* getFilePath() { return "/.crosspoint/lcp_device.json"; }
-  void toJson(JsonDocument& doc) const {
+  bool toJson(JsonDocument& doc) const {
     doc["device_id"] = deviceId;
-    doc["priv_obf"] = obfuscation::obfuscateToBase64(privHex);
+    String privObf;
+    if (!obfuscation::obfuscateToBase64(privHex, privObf)) return false;
+    doc["priv_obf"] = privObf;
+    return true;
   }
   bool fromJson(JsonVariantConst doc) {
     deviceId = doc["device_id"] | "";
     bool ok = false;
     bool tooLong = false;
-    privHex = obfuscation::deobfuscateFromBase64(doc["priv_obf"] | "", 64, &ok, &tooLong);
+    bool legacy = false;
+    const char* stored = doc["priv_obf"] | "";
+    privHex = obfuscation::deobfuscateFromBase64(stored, 64, &ok, &tooLong, &legacy);
+    undecodablePriv = stored[0] != '\0' && privHex.size() != 64;
+    if (legacy && !undecodablePriv) requestResave();
     return true;
   }
   bool valid() const { return !deviceId.empty() && privHex.size() == 64; }
@@ -115,6 +123,10 @@ bool ensureEnrolled(std::string& deviceId, bool& notEnrollable) {
   if (LCP_DEVICE.valid()) {
     deviceId = LCP_DEVICE.deviceId;
     return true;
+  }
+  if (LCP_DEVICE.undecodablePriv) {
+    LOG_ERR("LCPDEV", "Stored device key did not decode");
+    return false;
   }
   static constexpr char RELEASE_KEY[] = FREEINK_LCP_RELEASE_KEY;
   if (RELEASE_KEY[0] == '\0') {

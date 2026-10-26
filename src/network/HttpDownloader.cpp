@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Logging.h>
 #include <ResumableFetch.h>
+#include <TlsTrust.h>
 
 #include <algorithm>
 #include <functional>
@@ -26,7 +27,7 @@ constexpr size_t MAX_RESPONSE_BYTES = 4096;
 
 void applyCommonClientSetup(freeink::SecureHttpClient& http) {
   http.setTimeout(HTTP_TIMEOUT_MS);
-  http.setInsecure();
+  applyTlsTrust(http);
   // setUserAgent replaces SecureHttpClient's built-in UA; addHeader would
   // append a second User-Agent header, which strict servers reject (aiohttp
   // answers 400 "Duplicate 'User-Agent' header found").

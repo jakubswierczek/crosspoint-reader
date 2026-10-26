@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <SecureHttpClient.h>
+#include <TlsTrust.h>
 
 #include <algorithm>
 #include <cctype>
@@ -22,9 +23,7 @@ freeink::SecureHttpClient* openClient(freeink::SecureHttpClient* session, freein
                                       const std::string& url, const pluginhttp::Headers& headers) {
   freeink::SecureHttpClient& http = session ? *session : tmp;
   http.setUserAgent("CrossPoint");
-  // Same trust posture as every other SecureNet consumer: no CA bundle ships
-  // with the transport, so verification is skipped; traffic stays encrypted.
-  http.setInsecure();
+  applyTlsTrust(http);
   http.setTimeout(30000);
   if (!http.begin(url)) return nullptr;
   for (const auto& h : headers) http.addHeader(h.first, h.second);

@@ -71,7 +71,7 @@ class PersistableStoreBase {
  * - A private default constructor
  * - friend class PersistableStore<Derived>;
  * - static const char* getFilePath();
- * - void toJson(JsonDocument& doc) const;
+ * - bool toJson(JsonDocument& doc) const; return false to skip the write.
  * - bool fromJson(JsonVariantConst doc);
  *
  * Note for implementers: read string values as `const char*` (e.g.
@@ -102,7 +102,10 @@ class PersistableStore : public PersistableStoreBase {
   bool saveToFile() const {
     std::lock_guard<std::mutex> lock(storeMutex);
     JsonDocument doc;
-    static_cast<const T*>(this)->toJson(doc);
+    if (!static_cast<const T*>(this)->toJson(doc)) {
+      LOG_ERR("PERSIST", "Refusing to write %s", T::getFilePath());
+      return false;
+    }
     return writeDocToFile(T::getFilePath(), doc);
   }
 

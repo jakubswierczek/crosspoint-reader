@@ -11,20 +11,22 @@
 #include "LanguageRegistry.h"
 
 const LanguageHyphenator* Hyphenator::cachedHyphenator_ = nullptr;
+bool Hyphenator::polishTypographyActive_ = false;
 
 namespace {
 
 // Normalize ISO 639-2 (three-letter) codes to ISO 639-1 (two-letter) codes used by the
 // hyphenation registry.  EPUBs may use either form in their dc:language metadata (e.g.
-// "eng" instead of "en").  Both the bibliographic ("fre"/"ger") and terminological
-// ("fra"/"deu") ISO 639-2 variants are mapped.
+// "eng" instead of "en", "pol" instead of "pl").  Both the bibliographic ("fre"/"ger")
+// and terminological ("fra"/"deu") ISO 639-2 variants are mapped.  The table covers
+// every language in LanguageRegistry.
 struct Iso639Mapping {
   const char* iso639_2;
   const char* iso639_1;
 };
-static constexpr Iso639Mapping kIso639Mappings[] = {{"eng", "en"}, {"fra", "fr"}, {"fre", "fr"}, {"deu", "de"},
-                                                    {"ger", "de"}, {"rus", "ru"}, {"spa", "es"}, {"ita", "it"},
-                                                    {"ukr", "uk"}, {"swe", "sv"}, {"fin", "fi"}};
+static constexpr Iso639Mapping kIso639Mappings[] = {
+    {"eng", "en"}, {"fra", "fr"}, {"fre", "fr"}, {"deu", "de"}, {"ger", "de"}, {"rus", "ru"}, {"spa", "es"},
+    {"ita", "it"}, {"ukr", "uk"}, {"swe", "sv"}, {"fin", "fi"}, {"pol", "pl"}, {"por", "pt"}};
 
 // Maps a BCP-47 or ISO 639-2 language tag to a language-specific hyphenator.
 const LanguageHyphenator* hyphenatorForLanguage(const std::string& langTag) {
@@ -272,4 +274,16 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   return breaks;
 }
 
-void Hyphenator::setPreferredLanguage(const std::string& lang) { cachedHyphenator_ = hyphenatorForLanguage(lang); }
+void Hyphenator::setPreferredLanguage(const std::string& lang) {
+  cachedHyphenator_ = hyphenatorForLanguage(lang);
+  const auto* polish = getLanguageHyphenatorForPrimaryTag("pl");
+  polishTypographyActive_ = polish != nullptr && cachedHyphenator_ == polish;
+}
+
+bool Hyphenator::polishTypography() { return polishTypographyActive_; }
+
+bool Hyphenator::replacePolishTypography(const bool active) {
+  const bool previous = polishTypographyActive_;
+  polishTypographyActive_ = active;
+  return previous;
+}

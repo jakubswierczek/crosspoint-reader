@@ -42,7 +42,7 @@ class WifiCredentialStore : public PersistableStore<WifiCredentialStore> {
 
  public:
   static const char* getFilePath() { return "/.crosspoint/wifi.json"; }
-  void toJson(JsonDocument& doc) const;
+  bool toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 
   // Credential management

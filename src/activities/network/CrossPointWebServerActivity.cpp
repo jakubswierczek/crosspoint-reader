@@ -7,6 +7,7 @@
 #include <HalGPIO.h>
 #include <I18n.h>
 #include <WiFi.h>
+#include <esp_random.h>
 
 #include <cstddef>
 
@@ -17,6 +18,8 @@
 #include "activities/network/CalibreConnectActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/HotspotPassword.h"
+#include "network/WebAccessCode.h"
 #include "util/PluginEvents.h"
 #include "util/QrUtils.h"
 #include "util/TaskWatchdog.h"
@@ -24,7 +27,6 @@
 namespace {
 // AP Mode configuration
 constexpr const char* AP_SSID = "CrossPoint-Reader";
-constexpr const char* AP_PASSWORD = nullptr;  // Open network for ease of use
 constexpr const char* AP_HOSTNAME = "crosspoint";
 constexpr uint8_t AP_CHANNEL = 1;
 constexpr uint8_t AP_MAX_CONNECTIONS = 4;
@@ -243,14 +245,16 @@ void CrossPointWebServerActivity::startAccessPoint() {
   WiFi.mode(WIFI_AP);
   delay(100);
 
-  // Start soft AP
-  bool apStarted;
-  if (AP_PASSWORD && strlen(AP_PASSWORD) >= 8) {
-    apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
-  } else {
-    // Open network (no password)
-    apStarted = WiFi.softAP(AP_SSID, nullptr, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
+  // New passphrase every time the hotspot starts. It stays on this activity
+  // (11 bytes) and is shown next to the Wi-Fi QR; it is not written to SD.
+  hotspot::generatePassword(apPassword, esp_random);
+  if (!hotspot::passwordCharsOk(apPassword)) {
+    LOG_ERR("WEBACT", "Hotspot password was not generated");
+    onGoHome();
+    return;
   }
+
+  const bool apStarted = WiFi.softAP(AP_SSID, apPassword, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
 
   if (!apStarted) {
     LOG_ERR("WEBACT", "ERROR: Failed to start Access Point!");
@@ -468,6 +472,7 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
 void CrossPointWebServerActivity::renderServerRunning() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
                  isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER), nullptr);
@@ -478,7 +483,14 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     renderWifiIndicator(metrics.topPadding + metrics.headerHeight);
   }
 
-  int startY = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing * 2;
+  // Under the subheader, so a 480-tall landscape still shows the code.
+  // The QR below keeps ?k= ; this line is what a person types.
+  int startY = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
+  const std::string accessCode = webAccessCode();
+  const std::string accessLine = std::string(tr(STR_ACCESS_CODE)) + " " + accessCode;
+  renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, startY, accessLine.c_str(), true, EpdFontFamily::BOLD);
+  startY += renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing;
+
   int height10 = renderer.getLineHeight(UI_10_FONT_ID);
   if (isApMode) {
     // AP mode display
@@ -488,13 +500,20 @@ void CrossPointWebServerActivity::renderServerRunning() const {
 
     // Show QR code for Wifi
     // follows spec at https://github.com/zxing/zxing/wiki/Barcode-Contents#wi-fi-network-config-android-ios-11
-    const std::string wifiConfig = std::string("WIFI:T:nopass;S:") + connectedSSID + ";;";
+    char wifiQr[80];
+    if (!hotspot::formatWifiQr(wifiQr, sizeof(wifiQr), connectedSSID.c_str(), apPassword)) {
+      LOG_ERR("WEBACT", "Hotspot QR payload was rejected");
+      wifiQr[0] = '\0';
+    }
+    const std::string wifiConfig(wifiQr);
     const Rect qrBoundsWifi(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBoundsWifi, wifiConfig);
 
-    // Show network name
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 80,
-                      connectedSSID.c_str());
+    // Show network name and the session passphrase beside the QR.
+    const int textX = metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing;
+    renderer.drawText(UI_10_FONT_ID, textX, startY + 60, connectedSSID.c_str());
+    renderer.drawText(UI_10_FONT_ID, textX, startY + 90, tr(STR_HOTSPOT_PASSWORD), true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, textX, startY + 110, apPassword);
 
     startY += QR_CODE_HEIGHT + 2 * metrics.verticalSpacing;
 
@@ -503,16 +522,17 @@ void CrossPointWebServerActivity::renderServerRunning() const {
                       EpdFontFamily::BOLD);
     startY += height10 + metrics.verticalSpacing * 2;
 
-    std::string hostnameUrl = std::string("http://") + AP_HOSTNAME + ".local/";
+    std::string hostnameLabel = std::string("http://") + AP_HOSTNAME + ".local/";
+    std::string hostnameUrl = hostnameLabel + "?k=" + accessCode;
     std::string ipUrl = tr(STR_OR_HTTP_PREFIX) + connectedIP + "/";
 
-    // Show QR code for URL
+    // Show QR code for URL. Scanning it opens the file page already signed in.
     const Rect qrBoundsUrl(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBoundsUrl, hostnameUrl);
 
     // Show IP address as fallback
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 80,
-                      hostnameUrl.c_str());
+                      hostnameLabel.c_str());
     renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 100,
                       ipUrl.c_str());
   } else {
@@ -525,14 +545,19 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_SCAN_QR_HINT), true, EpdFontFamily::BOLD);
     startY += height10 + metrics.verticalSpacing * 2;
 
-    // Show QR code for URL
-    std::string webInfo = "http://" + connectedIP + "/";
-    const Rect qrBounds((pageWidth - QR_CODE_WIDTH) / 2, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
+    // Show QR code for URL. The query signs the browser in; the text below stays readable.
+    // Shrink on a short panel so the modules, including the finders, stay on the glass.
+    std::string webLabel = "http://" + connectedIP + "/";
+    std::string webInfo = webLabel + "?k=" + accessCode;
+    int qrSize = QR_CODE_WIDTH;
+    if (startY + qrSize > pageHeight) qrSize = pageHeight - startY;
+    if (qrSize < 132) qrSize = 132;
+    const Rect qrBounds((pageWidth - qrSize) / 2, startY, qrSize, qrSize);
     QrUtils::drawQrCode(renderer, qrBounds, webInfo);
-    startY += QR_CODE_HEIGHT + metrics.verticalSpacing * 2;
+    startY += qrSize + metrics.verticalSpacing * 2;
 
     // Show web server URL prominently
-    renderer.drawCenteredText(UI_10_FONT_ID, startY, webInfo.c_str(), true);
+    renderer.drawCenteredText(UI_10_FONT_ID, startY, webLabel.c_str(), true);
     startY += height10 + 5;
 
     // Also show hostname URL

@@ -25,7 +25,7 @@ class CrossPointState : public PersistableStore<CrossPointState> {
   bool showBootScreen = true;
 
   static const char* getFilePath() { return "/.crosspoint/state.json"; }
-  void toJson(JsonDocument& doc) const;
+  bool toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 
   bool isRecentSleep(uint16_t idx, uint8_t checkCount) const;

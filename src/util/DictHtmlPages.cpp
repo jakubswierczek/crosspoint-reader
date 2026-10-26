@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "Epub/hyphenation/Hyphenator.h"
 
 namespace {
 
@@ -218,6 +219,8 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
   bool ok = false;
   const char* limitReason = nullptr;
   size_t retainedElements = 0;
+  // A Polish book must not change line breaks in a definition of another language.
+  const bool polishTypography = Hyphenator::replacePolishTypography(false);
   {
     const std::string tmpPath = TMP_HTML_PATH;  // the parser stores a reference
     // Heap-allocated as Section does — the parser object is far too large for
@@ -263,6 +266,7 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
       ok = parser->parseAndBuildPages();  // closes the file on both outcomes
     }
   }
+  Hyphenator::replacePolishTypography(polishTypography);
   Storage.remove(TMP_HTML_PATH);
 
   if (limitReason) {
