@@ -27,7 +27,7 @@ networks or in hotspot mode when you control who is connected.
 |------|----------|
 | **Join Network** | You want the reader to join an existing Wi-Fi network. |
 | **Calibre Wireless** | You want to receive books from the CrossPoint Calibre plugin workflow. |
-| **Create Hotspot** | You want the reader to create its own open Wi-Fi network. |
+| **Create Hotspot** | You want the reader to create its own Wi-Fi network. The password is on the reader. |
 
 ## Join Network Mode
 
@@ -53,11 +53,10 @@ Use either URL from a phone, tablet, or computer on the same network.
 ## Create Hotspot Mode
 
 1. Select **Create Hotspot**.
-2. Connect your phone or computer to the open Wi-Fi network:
-
-```text
-CrossPoint-Reader
-```
+2. Connect your phone or computer to the Wi-Fi network. The name is
+   `CrossPoint-Reader`. The password is on the reader, next to the Wi-Fi QR
+   code, and changes each time the hotspot starts. Scanning that QR joins the
+   network.
 
 3. Open the URL shown on the reader. `http://crosspoint.local/` is preferred
    when supported; the fallback IP is typically `http://192.168.4.1/`.
@@ -144,7 +143,7 @@ Endpoint details are documented in [webserver-endpoints.md](./webserver-endpoint
 - There is no authentication.
 - Anyone on the same network can access the web interface while it is running.
 - The server stops when you exit File Transfer or Calibre Wireless mode.
-- Hotspot mode creates an open network for connectivity fallback; disconnect when done.
+- Hotspot mode uses WPA2. The password is shown only on the reader and is not saved. Disconnect when done.
 
 ## Tips
 
