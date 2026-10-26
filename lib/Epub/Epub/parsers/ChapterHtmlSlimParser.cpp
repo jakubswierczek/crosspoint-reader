@@ -18,11 +18,13 @@
 
 #include "Epub.h"
 #include "Epub/Page.h"
+#include "Epub/PolishLineGlue.h"
 #include "Epub/VisibleTextUtils.h"
 #include "Epub/converters/ImageDecoderFactory.h"
 #include "Epub/converters/ImageDimsProbe.h"
 #include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "Epub/htmlEntities.h"
+#include "Epub/hyphenation/Hyphenator.h"
 
 // Minimum file size (in bytes) to show indexing popup - smaller chapters don't benefit from it
 constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
@@ -659,41 +661,128 @@ void ChapterHtmlSlimParser::setCurrentPageVisibleOffset(const uint32_t offset) {
 }
 
 // flush the contents of partWordBuffer to currentTextBlock
-void ChapterHtmlSlimParser::flushPartWordBuffer() {
+void ChapterHtmlSlimParser::rememberPolishGlueStyle() {
+  if (!currentTextBlock) return;
+  const bool isBold = boldUntilDepth < depth || effectiveBold;
+  const bool isItalic = italicUntilDepth < depth || effectiveItalic;
+  EpdFontFamily::Style fontStyle = EpdFontFamily::REGULAR;
+  if (isBold) fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::BOLD);
+  if (isItalic) fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::ITALIC);
+  fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | fontStyleForTextDecoration(effectiveTextDecoration));
+  if (effectiveSmallCaps) fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SMALL_CAPS);
+  if (effectiveSup) {
+    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUP);
+  } else if (effectiveSub) {
+    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUB);
+  }
+  polishGlueStyle = fontStyle;
+  polishGlueLinkId = 0;
+  if (insideFootnoteLink && currentTextBlock) {
+    if (!currentTextBlock->linkTargetMatches(currentFootnoteLinkId, currentFootnote.href)) {
+      currentFootnoteLinkId = currentTextBlock->addLinkTarget(currentFootnote.href);
+    }
+    polishGlueLinkId = currentFootnoteLinkId;
+  }
+  float inlineScale = 0.0f;
+  for (const auto& entry : inlineStyleStack) {
+    if (!entry.hasFontScale) continue;
+    const float base = inlineScale > 0.0f ? inlineScale : currentTextBlock->getBlockStyle().fontScale;
+    inlineScale = entry.fontScaleRem ? entry.fontScale : base * entry.fontScale;
+  }
+  polishGlueSizeSlot = currentTextBlock && inlineScale > 0.0f &&
+                               (inlineSize.valid || inlineScale != currentTextBlock->getBlockStyle().fontScale)
+                           ? currentTextBlock->sizeSlotFor(std::clamp(inlineScale, 0.5f, 3.0f))
+                           : 0;
+}
+
+bool ChapterHtmlSlimParser::lastTokenIsPolishSingleLetter() const {
+  if (!Hyphenator::polishTypography() || !currentTextBlock || currentTextBlock->isEmpty()) return false;
+  const size_t last = currentTextBlock->size() - 1;
+  const std::string_view word = currentTextBlock->wordAt(last);
+  size_t letterAt = 0;
+  size_t prefixCodepoints = 0;
+  if (!polishSingleLetterWord(word.data(), word.size(), &letterAt, &prefixCodepoints)) return false;
+  // "w<em>i</em>" flushes "i" attached to "w". That fragment is not its own word.
+  // A continued opening quote ("„" then "i") still is.
+  if (!currentTextBlock->wordContinuesAt(last) || last == 0) return true;
+  const std::string_view previous = currentTextBlock->wordAt(last - 1);
+  // "i <em>w</em>" stores "w" attached to the glue space. That space is the
+  // word boundary, so "w" is its own word. "w<em>i</em>" is not: "i" follows "w".
+  if (previous == " ") return true;
+  size_t index = 0;
+  if (previous.empty()) return false;
+  while (index < previous.size()) {
+    uint32_t cp = 0;
+    if (!polishGlueNextCp(previous.data(), previous.size(), &index, &cp) || !polishGlueIsPunctuation(cp)) return false;
+  }
+  return true;
+}
+
+void ChapterHtmlSlimParser::flushPartWordBuffer(const bool owedPolishSpace) {
   // Block creation failed (OOM): drop the buffered text; parseStep() is about
   // to fail the build via layoutOom.
   if (!currentTextBlock) {
     partWordBufferIndex = 0;
     nextWordContinues = false;
+    polishGlueArmed = false;
+    polishGlueOffset = 0;
     return;
   }
 
-  if (effectivePreserveWhitespace) {
+  // The owed Polish space was a normal space. A later pre span must not restyle it.
+  if (!owedPolishSpace && effectivePreserveWhitespace) {
     currentTextBlock->suppressFirstLineIndent();
     auto& style = currentTextBlock->getBlockStyle();
     if (style.alignment == CssTextAlign::Justify) style.alignment = CssTextAlign::Left;
   }
 
-  // Determine font style from depth-based tracking and CSS effective style
-  const bool isBold = boldUntilDepth < depth || effectiveBold;
-  const bool isItalic = italicUntilDepth < depth || effectiveItalic;
-
-  // Combine style flags using bitwise OR
   EpdFontFamily::Style fontStyle = EpdFontFamily::REGULAR;
-  if (isBold) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::BOLD);
-  }
-  if (isItalic) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::ITALIC);
-  }
-  fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | fontStyleForTextDecoration(effectiveTextDecoration));
-  if (effectiveSmallCaps) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SMALL_CAPS);
-  }
-  if (effectiveSup) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUP);
-  } else if (effectiveSub) {
-    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUB);
+  uint8_t linkId = 0;
+  uint8_t sizeSlot = 0;
+  bool noSpaceBefore = false;
+  if (owedPolishSpace) {
+    fontStyle = polishGlueStyle;
+    linkId = polishGlueLinkId;
+    sizeSlot = polishGlueSizeSlot;
+  } else {
+    // Determine font style from depth-based tracking and CSS effective style
+    const bool isBold = boldUntilDepth < depth || effectiveBold;
+    const bool isItalic = italicUntilDepth < depth || effectiveItalic;
+
+    // Combine style flags using bitwise OR
+    if (isBold) {
+      fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::BOLD);
+    }
+    if (isItalic) {
+      fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::ITALIC);
+    }
+    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | fontStyleForTextDecoration(effectiveTextDecoration));
+    if (effectiveSmallCaps) {
+      fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SMALL_CAPS);
+    }
+    if (effectiveSup) {
+      fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUP);
+    } else if (effectiveSub) {
+      fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUB);
+    }
+
+    if (insideFootnoteLink) {
+      if (!currentTextBlock->linkTargetMatches(currentFootnoteLinkId, currentFootnote.href)) {
+        currentFootnoteLinkId = currentTextBlock->addLinkTarget(currentFootnote.href);
+      }
+      linkId = currentFootnoteLinkId;
+    }
+    // Inline font-size spans size their words apart from the block.
+    float inlineScale = 0.0f;
+    for (const auto& entry : inlineStyleStack) {
+      if (!entry.hasFontScale) continue;
+      const float base = inlineScale > 0.0f ? inlineScale : currentTextBlock->getBlockStyle().fontScale;
+      inlineScale = entry.fontScaleRem ? entry.fontScale : base * entry.fontScale;
+    }
+    sizeSlot = inlineScale > 0.0f && (inlineSize.valid || inlineScale != currentTextBlock->getBlockStyle().fontScale)
+                   ? currentTextBlock->sizeSlotFor(std::clamp(inlineScale, 0.5f, 3.0f))
+                   : 0;
+    noSpaceBefore = effectivePreserveWhitespace;
   }
 
   // flush the buffer
@@ -703,26 +792,8 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
     fallbackTableRowToStacked();
   }
 
-  uint8_t linkId = 0;
-  if (insideFootnoteLink) {
-    if (!currentTextBlock->linkTargetMatches(currentFootnoteLinkId, currentFootnote.href)) {
-      currentFootnoteLinkId = currentTextBlock->addLinkTarget(currentFootnote.href);
-    }
-    linkId = currentFootnoteLinkId;
-  }
-  // Inline font-size spans size their words apart from the block.
-  float inlineScale = 0.0f;
-  for (const auto& entry : inlineStyleStack) {
-    if (!entry.hasFontScale) continue;
-    const float base = inlineScale > 0.0f ? inlineScale : currentTextBlock->getBlockStyle().fontScale;
-    inlineScale = entry.fontScaleRem ? entry.fontScale : base * entry.fontScale;
-  }
-  const uint8_t sizeSlot =
-      inlineScale > 0.0f && (inlineSize.valid || inlineScale != currentTextBlock->getBlockStyle().fontScale)
-          ? currentTextBlock->sizeSlotFor(std::clamp(inlineScale, 0.5f, 3.0f))
-          : 0;
   currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, partWordVisibleOffset, linkId,
-                            sizeSlot, effectivePreserveWhitespace);
+                            sizeSlot, noSpaceBefore);
   if (insideTableCell && !tableRowStacked) {
     tableRowTextBytes += wordBytes;
     size_t rowWords = currentTextBlock->size();
@@ -750,6 +821,8 @@ void ChapterHtmlSlimParser::breakTextLine(const BlockStyle& style) {
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle, const bool paragraphEnd) {
   if (stopRequested) return;
   nextWordContinues = false;  // New block = new paragraph, no continuation
+  polishGlueArmed = false;
+  polishGlueOffset = 0;
   if (currentTextBlock) {
     // already have a text block running and it is empty - just reuse it
     if (currentTextBlock->isEmpty()) {
@@ -1457,6 +1530,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         self->flushPartWordBuffer();
       }
       self->nextWordContinues = false;
+      self->polishGlueArmed = false;
       self->tableDepth += 1;
       self->depth += 1;
       return;
@@ -1570,6 +1644,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       tableCellBlockStyle.isRtl = cssStyle.direction == CssTextDirection::Rtl;
     }
 
+    self->polishGlueArmed = false;
     self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
                                                            tableCellBlockStyle, self->paragraphIndentSpaces);
     if (!self->currentTextBlock) {
@@ -2309,6 +2384,7 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   if (!self->currentTextBlock) {
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
+    self->polishGlueArmed = false;
     self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
                                                            flowStyle, self->paragraphIndentSpaces);
     if (!self->currentTextBlock) {
@@ -2399,12 +2475,69 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
     if (isWhitespace(s[i])) {
       // Currently looking at whitespace, if there's anything in the partWordBuffer, flush it
       if (self->partWordBufferIndex > 0) {
-        self->flushPartWordBuffer();
+        // Keep a one-letter Polish word with the next word. The continued space
+        // is emitted when that word starts, same shape as a no-break space, so
+        // the following word can still hyphenate. A trailing newline owes nothing.
+        // "we" and "w." stay breakable. Opening punctuation ("„i") is its own
+        // token and stays with the letter. The space keeps the style it had here.
+        size_t letterAt = 0;
+        size_t prefixCodepoints = 0;
+        const bool gluePolish =
+            Hyphenator::polishTypography() &&
+            polishSingleLetterWord(self->partWordBuffer, static_cast<size_t>(self->partWordBufferIndex), &letterAt,
+                                   &prefixCodepoints);
+        if (gluePolish) {
+          if (letterAt > 0) {
+            const char letter = self->partWordBuffer[letterAt];
+            const uint32_t wordOffset = self->partWordVisibleOffset;
+            self->partWordBufferIndex = static_cast<int>(letterAt);
+            self->flushPartWordBuffer();
+            self->partWordBuffer[0] = letter;
+            self->partWordBufferIndex = 1;
+            self->partWordVisibleOffset = wordOffset + static_cast<uint32_t>(prefixCodepoints);
+            self->nextWordContinues = true;
+          }
+          self->flushPartWordBuffer();
+          self->rememberPolishGlueStyle();
+          self->polishGlueArmed = true;
+          self->polishGlueOffset = codepointOffset;
+        } else {
+          self->flushPartWordBuffer();
+          // A second space, or a space in a later chunk, must not undo the glue.
+          if (!self->polishGlueArmed) self->nextWordContinues = false;
+        }
+      } else if (!self->polishGlueArmed) {
+        // A tag may have flushed the letter already: "<em>i</em> domu".
+        // Glue when that token is the one-letter word. "<em>w</em>ord" has no
+        // space here, and "w<em>i</em>" is the fragment "i", so both stay words.
+        if (self->lastTokenIsPolishSingleLetter()) {
+          self->rememberPolishGlueStyle();
+          self->polishGlueArmed = true;
+          self->polishGlueOffset = codepointOffset;
+        } else {
+          // Whitespace is a real word boundary — reset continuation state.
+          // Inline tags set the flag; a space after </b> is what clears it.
+          self->nextWordContinues = false;
+        }
       }
-      // Whitespace is a real word boundary — reset continuation state
-      self->nextWordContinues = false;
-      // Skip the whitespace char
       continue;
+    }
+
+    // The next word arrived. Emit the owed space so both sides continue.
+    // A no-break space is that glue itself; emitting another would double it.
+    if (self->polishGlueArmed) {
+      const bool nbsp = static_cast<uint8_t>(s[i]) == 0xC2 && i + 1 < len && static_cast<uint8_t>(s[i + 1]) == 0xA0;
+      const bool narrowNbsp = static_cast<uint8_t>(s[i]) == 0xE2 && i + 2 < len &&
+                              static_cast<uint8_t>(s[i + 1]) == 0x80 && static_cast<uint8_t>(s[i + 2]) == 0xAF;
+      if (!nbsp && !narrowNbsp && self->currentTextBlock) {
+        self->partWordBuffer[0] = ' ';
+        self->partWordBufferIndex = 1;
+        self->partWordVisibleOffset = self->polishGlueOffset;
+        self->nextWordContinues = true;
+        self->flushPartWordBuffer(true);
+        self->nextWordContinues = true;
+      }
+      self->polishGlueArmed = false;
     }
 
     // Detect U+00A0 (non-breaking space, UTF-8: 0xC2 0xA0) or
@@ -2621,6 +2754,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
       self->flushPartWordBuffer();
     }
     self->nextWordContinues = false;
+    self->polishGlueArmed = false;
     self->tableDepth -= 1;
     self->depth -= 1;
     LOG_DBG("EHP", "nested table flattened into enclosing cell");
@@ -2688,11 +2822,13 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   if (!insideSkippedSubtree && self->tableDepth == 1 && (strcmp(name, "td") == 0 || strcmp(name, "th") == 0)) {
     self->closeTableCell();
     self->nextWordContinues = false;
+    self->polishGlueArmed = false;
   }
 
   if (!insideSkippedSubtree && self->tableDepth == 1 && (strcmp(name, "tr") == 0)) {
     self->finishTableRow();
     self->nextWordContinues = false;
+    self->polishGlueArmed = false;
   }
 
   if (!insideSkippedSubtree && self->tableDepth == 1 && strcmp(name, "table") == 0) {
@@ -2708,6 +2844,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
     self->tableRowTextBytes = 0;
     self->tableRowCells.clear();
     self->nextWordContinues = false;
+    self->polishGlueArmed = false;
 
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();

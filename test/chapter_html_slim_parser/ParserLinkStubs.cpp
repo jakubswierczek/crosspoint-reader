@@ -17,6 +17,32 @@ bool isSoftHyphen(uint32_t) { return false; }
 
 std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string&, bool) { return {}; }
 
+namespace {
+bool polishTypographyForTest = false;
+}  // namespace
+
+void Hyphenator::setPreferredLanguage(const std::string& lang) {
+  std::string primary;
+  for (char c : lang) {
+    if (c == '-' || c == '_') break;
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    primary.push_back(c);
+  }
+  // "pol" is selected by the hyphenation-tag change. This stub matches a tag
+  // whose primary subtag is already "pl".
+  polishTypographyForTest = primary == "pl";
+}
+
+bool Hyphenator::polishTypography() { return polishTypographyForTest; }
+
+bool Hyphenator::replacePolishTypography(const bool active) {
+  const bool previous = polishTypographyForTest;
+  polishTypographyForTest = active;
+  return previous;
+}
+
+bool Hyphenator::polishTypographyActive_ = false;
+
 ImageBlock::ImageBlock(const std::string& imagePath, const std::string& srcPath, int16_t width, int16_t height)
     : imagePath(imagePath), srcPath(srcPath), width(width), height(height) {}
 
