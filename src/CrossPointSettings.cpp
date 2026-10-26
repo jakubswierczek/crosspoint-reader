@@ -64,11 +64,12 @@ uint8_t CrossPointSettings::sleepTimeoutEnumToMinutes(const uint8_t legacyValue)
   }
 }
 
-void CrossPointSettings::toJson(JsonDocument& doc) const {
+bool CrossPointSettings::toJson(JsonDocument& doc) const {
   const CrossPointSettings& s = *this;
+  bool ok = true;
 
   auto visit = [&](const SettingInfo& info) {
-    if (!info.key) return;
+    if (!ok || !info.key) return;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
     if (!info.valuePtr && !info.stringOffset) return;
 
@@ -77,7 +78,12 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
       if (info.obfuscated) {
         char obfKey[OBF_KEY_BUF];
         snprintf(obfKey, sizeof(obfKey), "%s_obf", info.key);
-        doc[obfKey] = obfuscation::obfuscateToBase64(strPtr);
+        String obf;
+        if (!obfuscation::obfuscateToBase64(strPtr, obf)) {
+          ok = false;
+          return;
+        }
+        doc[obfKey] = obf;
       } else {
         doc[info.key] = strPtr;
       }
@@ -120,6 +126,7 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   }
 
   bleturner::writeJson(ble, doc);
+  return ok;
 }
 
 bool CrossPointSettings::fromJson(JsonVariantConst doc) {
@@ -150,8 +157,10 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
         snprintf(obfKey, sizeof(obfKey), "%s_obf", info.key);
         bool ok = false;
         bool tooLong = false;
+        bool legacy = false;
         const std::string decoded =
-            obfuscation::deobfuscateFromBase64(doc[obfKey] | "", info.stringMaxLen - 1, &ok, &tooLong);
+            obfuscation::deobfuscateFromBase64(doc[obfKey] | "", info.stringMaxLen - 1, &ok, &tooLong, &legacy);
+        if (legacy) needsResave = true;
         if (tooLong) {
           LOG_ERR("CPS", "Oversized obfuscated value for key '%s'", info.key);
           needsResave = true;

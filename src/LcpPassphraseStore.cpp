@@ -10,19 +10,24 @@ namespace {
 constexpr size_t MAX_HASH_CHARS = 64;
 }  // namespace
 
-void LcpPassphraseStore::toJson(JsonDocument& doc) const {
+bool LcpPassphraseStore::toJson(JsonDocument& doc) const {
   JsonArray arr = doc["passphrases"].to<JsonArray>();
   for (const auto& entry : entries) {
     JsonObject obj = arr.add<JsonObject>();
     obj["provider"] = entry.provider;
-    obj["key_obf"] = obfuscation::obfuscateToBase64(entry.userKeyHex);
+    String keyObf;
+    if (!obfuscation::obfuscateToBase64(entry.userKeyHex, keyObf)) return false;
+    obj["key_obf"] = keyObf;
   }
+  return true;
 }
 
 bool LcpPassphraseStore::fromJson(JsonVariantConst doc) {
   entries.clear();
   JsonArrayConst arr = doc["passphrases"].as<JsonArrayConst>();
   entries.reserve(std::min(arr.size(), MAX_PROVIDERS));
+  bool needsResave = false;
+  bool preserveFile = false;
   for (JsonObjectConst obj : arr) {
     if (entries.size() >= MAX_PROVIDERS) break;
     Entry entry;
@@ -30,10 +35,15 @@ bool LcpPassphraseStore::fromJson(JsonVariantConst doc) {
     if (entry.provider.empty()) continue;
     bool ok = false;
     bool tooLong = false;
-    entry.userKeyHex = obfuscation::deobfuscateFromBase64(obj["key_obf"] | "", MAX_HASH_CHARS, &ok, &tooLong);
+    bool legacy = false;
+    const char* storedKey = obj["key_obf"] | "";
+    entry.userKeyHex = obfuscation::deobfuscateFromBase64(storedKey, MAX_HASH_CHARS, &ok, &tooLong, &legacy);
+    if (legacy) needsResave = true;
+    if (storedKey[0] != '\0' && (!ok || tooLong)) preserveFile = true;
     if (entry.userKeyHex.empty()) continue;
     entries.push_back(std::move(entry));
   }
+  if (needsResave && !preserveFile) requestResave();
   LOG_DBG("LCPPASS", "Loaded %zu LCP passphrase entries", entries.size());
   return true;
 }
