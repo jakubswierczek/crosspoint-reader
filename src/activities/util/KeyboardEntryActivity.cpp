@@ -10,6 +10,8 @@
 #include "HapticFeedback.h"
 #include "KeyboardLayoutSet.h"
 #include "MappedInputManager.h"
+#include "PolishQwertyAlt.h"
+#include "Utf8FieldEdit.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -118,6 +120,44 @@ const fui::KeyboardKey URL_SNIP_BOTTOM[] = {UKS("abc", fui::KeyKind::Mode, fui::
 #undef UKS
 #undef UK15
 
+// Polish long-press letters on the English QWERTY grid. Widths match the SDK
+// English rows (character key 2, Shift/Delete 3) so the copied digit and
+// bottom rows still line up.
+#define PLK(label, value) \
+  fui::KeyboardKey { label, label, fui::KeyKind::Normal, fui::StateNormal, value, 2, true, polishQwertyAlt(value) }
+#define PLK15(label, kind, value) \
+  fui::KeyboardKey { label, nullptr, kind, fui::StateNormal, value, 3, true, nullptr }
+
+const fui::KeyboardKey PL_ROW1[] = {PLK("q", 'q'), PLK("w", 'w'), PLK("e", 'e'), PLK("r", 'r'), PLK("t", 't'),
+                                    PLK("y", 'y'), PLK("u", 'u'), PLK("i", 'i'), PLK("o", 'o'), PLK("p", 'p')};
+const fui::KeyboardKey PL_ROW2[] = {PLK("a", 'a'), PLK("s", 's'), PLK("d", 'd'), PLK("f", 'f'), PLK("g", 'g'),
+                                    PLK("h", 'h'), PLK("j", 'j'), PLK("k", 'k'), PLK("l", 'l')};
+const fui::KeyboardKey PL_ROW3[] = {PLK15(nullptr, fui::KeyKind::Shift, fui::QWERTY_KEY_SHIFT),
+                                    PLK("z", 'z'),
+                                    PLK("x", 'x'),
+                                    PLK("c", 'c'),
+                                    PLK("v", 'v'),
+                                    PLK("b", 'b'),
+                                    PLK("n", 'n'),
+                                    PLK("m", 'm'),
+                                    PLK15("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE)};
+const fui::KeyboardKey PL_SHIFT_ROW1[] = {PLK("Q", 'Q'), PLK("W", 'W'), PLK("E", 'E'), PLK("R", 'R'), PLK("T", 'T'),
+                                          PLK("Y", 'Y'), PLK("U", 'U'), PLK("I", 'I'), PLK("O", 'O'), PLK("P", 'P')};
+const fui::KeyboardKey PL_SHIFT_ROW2[] = {PLK("A", 'A'), PLK("S", 'S'), PLK("D", 'D'), PLK("F", 'F'), PLK("G", 'G'),
+                                          PLK("H", 'H'), PLK("J", 'J'), PLK("K", 'K'), PLK("L", 'L')};
+const fui::KeyboardKey PL_SHIFT_ROW3[] = {PLK15(nullptr, fui::KeyKind::Shift, fui::QWERTY_KEY_SHIFT),
+                                          PLK("Z", 'Z'),
+                                          PLK("X", 'X'),
+                                          PLK("C", 'C'),
+                                          PLK("V", 'V'),
+                                          PLK("B", 'B'),
+                                          PLK("N", 'N'),
+                                          PLK("M", 'M'),
+                                          PLK15("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE)};
+
+#undef PLK
+#undef PLK15
+
 const fui::KeyboardRow URL_ROWS[] = {
     {URL_NUM_ROW, 10, 0}, {URL_ROW1, 10, 0}, {URL_ROW2, 9, 1}, {URL_ROW3, 9, 0}, {URL_BOTTOM, 6, 0}};
 const fui::KeyboardRow URL_SHIFT_ROWS[] = {
@@ -128,6 +168,15 @@ const fui::KeyboardRow URL_SNIP_ROWS[] = {
 const fui::KeyboardLayout URL_LAYOUT{URL_ROWS, 5};
 const fui::KeyboardLayout URL_SHIFT_LAYOUT{URL_SHIFT_ROWS, 5};
 const fui::KeyboardLayout URL_SNIPPET_LAYOUT{URL_SNIP_ROWS, 4};
+
+void assignPolishLetterRows(fui::KeyboardRow* lower, fui::KeyboardRow* upper) {
+  lower[1] = {PL_ROW1, 10, 0};
+  lower[2] = {PL_ROW2, 9, 0};
+  lower[3] = {PL_ROW3, 9, 0};
+  upper[1] = {PL_SHIFT_ROW1, 10, 0};
+  upper[2] = {PL_SHIFT_ROW2, 9, 0};
+  upper[3] = {PL_SHIFT_ROW3, 9, 0};
+}
 
 }  // namespace
 
@@ -140,6 +189,8 @@ void KeyboardEntryActivity::onEnter() {
   // The key only earns its slot in the bottom row with somewhere to go.
   const uint16_t enabledLayouts = keyboard_layouts::enabled();
   showLangKey = (enabledLayouts & (enabledLayouts - 1)) != 0;
+  polishQwertyReady = false;
+  if (inputType != InputType::Url && I18N.getLanguage() == Language::PL) installPolishQwerty();
   shifted = false;
   symbols = false;
   urlPanel = false;
@@ -164,11 +215,31 @@ void KeyboardEntryActivity::onEnter() {
 
 void KeyboardEntryActivity::onExit() { Activity::onExit(); }
 
+void KeyboardEntryActivity::installPolishQwerty() {
+  const fui::KeyboardLayout& lower =
+      fui::builtinKeyboardLayout(fui::KeyboardLayoutId::QwertyEn, false, false, true, showLangKey);
+  const fui::KeyboardLayout& upper =
+      fui::builtinKeyboardLayout(fui::KeyboardLayoutId::QwertyEn, true, false, true, showLangKey);
+  if (lower.rowCount < 5 || upper.rowCount < 5) return;
+  // Digit and bottom rows stay the SDK tables, including the language key.
+  polishRows[0][0] = lower.rows[0];
+  polishRows[1][0] = upper.rows[0];
+  assignPolishLetterRows(polishRows[0], polishRows[1]);
+  polishRows[0][4] = lower.rows[4];
+  polishRows[1][4] = upper.rows[4];
+  polishLayouts[0] = {polishRows[0], 5};
+  polishLayouts[1] = {polishRows[1], 5};
+  polishQwertyReady = true;
+}
+
 const fui::KeyboardLayout& KeyboardEntryActivity::currentLayout() const {
   if (symbols) return fui::builtinKeyboardLayout(layoutId, shifted, true);
   if (inputType == InputType::Url) {
     if (urlPanel) return URL_SNIPPET_LAYOUT;
     return shifted ? URL_SHIFT_LAYOUT : URL_LAYOUT;
+  }
+  if (polishQwertyReady && layoutId == fui::KeyboardLayoutId::QwertyEn) {
+    return polishLayouts[shifted ? 1 : 0];
   }
   return fui::builtinKeyboardLayout(layoutId, shifted, false, /*numberRow=*/true, showLangKey);
 }
@@ -240,36 +311,13 @@ bool KeyboardEntryActivity::syncSelectionToValue(const int16_t value) {
   return false;
 }
 
-size_t KeyboardEntryActivity::utf8Prev(const std::string& s, size_t pos) {
-  if (pos == 0) return 0;
-  pos--;
-  while (pos > 0 && (static_cast<uint8_t>(s[pos]) & 0xC0) == 0x80) pos--;
-  return pos;
-}
+size_t KeyboardEntryActivity::utf8Prev(const std::string& s, size_t pos) { return utf8FieldPrev(s, pos); }
 
-size_t KeyboardEntryActivity::utf8Next(const std::string& s, size_t pos) {
-  if (pos >= s.length()) return s.length();
-  pos++;
-  while (pos < s.length() && (static_cast<uint8_t>(s[pos]) & 0xC0) == 0x80) pos++;
-  return pos;
-}
+size_t KeyboardEntryActivity::utf8Next(const std::string& s, size_t pos) { return utf8FieldNext(s, pos); }
 
-void KeyboardEntryActivity::insertUtf8(const char* out) {
-  if (!out || !*out) return;
-  const size_t n = strlen(out);
-  if (maxLength != 0 && text.length() + n > maxLength) return;
-  if (cursorPos > text.length()) cursorPos = text.length();
-  text.insert(cursorPos, out, n);
-  cursorPos += n;
-}
+void KeyboardEntryActivity::insertUtf8(const char* out) { utf8FieldInsert(text, cursorPos, maxLength, out); }
 
-bool KeyboardEntryActivity::backspaceUtf8() {
-  if (text.empty() || cursorPos == 0) return false;
-  const size_t prev = utf8Prev(text, cursorPos);
-  text.erase(prev, cursorPos - prev);
-  cursorPos = prev;
-  return true;
-}
+bool KeyboardEntryActivity::backspaceUtf8() { return utf8FieldBackspace(text, cursorPos); }
 
 bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPress) {
   switch (value) {
@@ -360,6 +408,10 @@ bool KeyboardEntryActivity::clearAllOrAltOnSelected() {
   const char* alt = fui::keyboardAltOutputFor(currentLayout(), key->value);
   if (alt) {
     insertUtf8(alt);
+    if (shifted && !symbols) {
+      shifted = false;  // same auto-release as a tap, including Polish capitals
+      clampSelection();
+    }
     return true;
   }
   return false;

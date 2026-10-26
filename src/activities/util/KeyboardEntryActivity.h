@@ -52,6 +52,13 @@ class KeyboardEntryActivity : public Activity {
   // Resolved once in onEnter(): the set cannot change while a keyboard is on
   // screen, and currentLayout() runs on every loop pass.
   bool showLangKey = false;
+  // QWERTY letter rows with Polish long-press letters, built in onEnter when
+  // the UI language is Polish. Digit and bottom rows point at the SDK tables.
+  // 96 bytes on a 32-bit target (ten 8-byte rows and two 8-byte layouts),
+  // released when the keyboard activity is destroyed.
+  bool polishQwertyReady = false;
+  freeink::ui::KeyboardRow polishRows[2][5]{};
+  freeink::ui::KeyboardLayout polishLayouts[2]{};
   bool shifted = false;
   bool symbols = false;
   bool urlPanel = false;  // URL snippet panel replaces the letter layer
@@ -118,6 +125,7 @@ class KeyboardEntryActivity : public Activity {
   int lineBreakEnd(std::string& s, int start, int maxWidth) const;
 
   const freeink::ui::KeyboardLayout& currentLayout() const;
+  void installPolishQwerty();
   const freeink::ui::KeyboardKey* selectedKey() const;
   int selectedLogicalIndex() const;
   void clampSelection();
