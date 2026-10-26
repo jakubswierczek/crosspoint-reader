@@ -975,6 +975,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     // The upload callback runs before middleware, so an anonymous body would
     // already be on the card by the time the 401 is sent.
     if (!webRequestMayWrite(*server)) {
+      state.success = false;
       state.error = "Access code required";
       return;
     }
@@ -3073,8 +3074,7 @@ void CrossPointWebServer::handleFontUploadData() {
   switch (upload.status) {
     case UPLOAD_FILE_START: {
       resetTaskWatchdogIfSubscribed();
-      if (!webRequestMayWrite(*server)) break;
-      String family = server->arg("family");
+      if (fontUpload.file) fontUpload.file.close();
       fontUpload.file = HalFile();
       fontUpload.familyName.clear();
       fontUpload.filePath.clear();
@@ -3084,6 +3084,8 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.bytesWritten = 0;
       fontUpload.bufferPos = 0;
       fontUpload.buffer.reset();
+      if (!webRequestMayWrite(*server)) break;
+      String family = server->arg("family");
 
       if (!FontInstaller::isValidFamilyName(family.c_str())) {
         LOG_ERR("WEB", "Invalid font family name: %s", family.c_str());

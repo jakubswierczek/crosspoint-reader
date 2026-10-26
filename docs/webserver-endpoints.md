@@ -27,7 +27,7 @@ Send one of:
 - `Authorization: Bearer <code>`
 - `Authorization: Basic ...` where the password is the code and the username is ignored
 - Cookie `cp=<code>` (set when a browser opens `/?k=<code>`; the device redirects to the same path without the query)
-- Query `k=<code>`. On `GET` and `HEAD`, a valid `k` and no `Authorization` header answers `302` to the same path with the query removed and sets cookie `cp`. `GET /download?path=/Books/MyBook.epub&k=<code>` therefore comes back as `Location: /download`, and `path` is gone. `POST` and the other methods are served on that request and also set the cookie. WebDAV `PUT` accepts `k` the same way.
+- Query `k=<code>`. On `GET` and `HEAD`, a valid `k` and no `Authorization` header answers `302` to the same path with the query removed and sets cookie `cp`. `GET /download?path=/Books/MyBook.epub&k=<code>` therefore comes back as `Location: /download`, and `path` is gone. `POST`, WebDAV `PUT`, and the other protected methods are served on that request and also set the cookie. `OPTIONS` stays public: a `k` on it does not set the cookie, and that presented code is counted as a wrong guess.
 
 A browser page that gets `401` can prompt for the code and reload with `?k=`.
 The WebSocket upload URL is `ws://<host>:81/?k=<code>`. A cookie or
@@ -44,8 +44,10 @@ one that has the right code.
 
 Eight wrong presented codes arm a device-wide 30-second lockout. During that
 window every non-public HTTP request is `429`, including a correct code. Shell
-reads with no `k` still succeed. A wrong or correct `k` on a shell page counts
-toward the same lockout. The WebSocket path does not use this counter.
+reads with no `k` still succeed. A wrong `k` on a shell page counts toward
+the lockout. A correct `k` clears it and answers `302`. Once the lockout is
+already armed, a shell request that presents `k` is `429`. The WebSocket path
+does not use this counter.
 
 A cookie-authenticated request needs `Origin: http://` plus that same host for
 every method except `GET`, `HEAD`, and `OPTIONS`, including WebDAV `PROPFIND`.
