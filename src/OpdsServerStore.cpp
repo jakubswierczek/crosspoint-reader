@@ -35,6 +35,7 @@ bool OpdsServerStore::fromJson(JsonVariantConst doc) {
   JsonArrayConst arr = doc["servers"].as<JsonArrayConst>();
   servers.reserve(std::min(arr.size(), MAX_SERVERS));
   bool needsResave = false;
+  bool preserveFile = false;
 
   for (JsonObjectConst obj : arr) {
     if (servers.size() >= OpdsServerStore::MAX_SERVERS) break;
@@ -42,16 +43,20 @@ bool OpdsServerStore::fromJson(JsonVariantConst doc) {
     server.name = obj["name"] | "";
     server.url = obj["url"] | "";
     server.username = obj["username"] | "";
+    const char* storedPassword = obj["password_obf"] | "";
     server.password = extractPassword(obj, needsResave);
+    if (storedPassword[0] != '\0' && server.password.empty()) preserveFile = true;
 
     size_t headerIndex = 0;
     for (JsonObjectConst headerObj : obj["headers"].as<JsonArrayConst>()) {
       if (headerIndex >= OpdsServer::MAX_CUSTOM_HEADERS) break;
       server.customHeaders[headerIndex].name = headerObj["name"] | "";
       bool legacy = false;
-      server.customHeaders[headerIndex].value =
-          obfuscation::deobfuscateFromBase64(headerObj["value_obf"] | "", nullptr, &legacy);
+      const char* storedValue = headerObj["value_obf"] | "";
+      bool valueOk = false;
+      server.customHeaders[headerIndex].value = obfuscation::deobfuscateFromBase64(storedValue, &valueOk, &legacy);
       if (legacy) needsResave = true;
+      if (storedValue[0] != '\0' && !valueOk) preserveFile = true;
       headerIndex++;
     }
 
@@ -60,7 +65,7 @@ bool OpdsServerStore::fromJson(JsonVariantConst doc) {
 
   LOG_DBG("OPS", "Loaded %zu OPDS servers from file", servers.size());
 
-  if (needsResave) {
+  if (needsResave && !preserveFile) {
     LOG_DBG("OPS", "Resaving JSON with obfuscated passwords");
     requestResave();
   }

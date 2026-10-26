@@ -45,7 +45,10 @@ bool KOReaderCredentialStore::fromJson(JsonVariantConst doc) {
   std::string user = doc["username"] | "";
 
   bool needsResave = false;
+  bool preserveFile = false;
+  const char* storedPassword = doc["password_obf"] | "";
   std::string pass = extractPassword(doc, needsResave);
+  if (storedPassword[0] != '\0' && pass.empty()) preserveFile = true;
 
   setCredentials(user, pass);
   setServerUrl(doc["serverUrl"] | "");
@@ -96,9 +99,11 @@ bool KOReaderCredentialStore::fromJson(JsonVariantConst doc) {
     if (headerIndex >= MAX_CUSTOM_HEADERS) break;
     customHeaders[headerIndex].name = headerObj["name"] | "";
     bool legacy = false;
-    customHeaders[headerIndex].value =
-        obfuscation::deobfuscateFromBase64(headerObj["value_obf"] | "", nullptr, &legacy);
+    const char* storedValue = headerObj["value_obf"] | "";
+    bool valueOk = false;
+    customHeaders[headerIndex].value = obfuscation::deobfuscateFromBase64(storedValue, &valueOk, &legacy);
     if (legacy) needsResave = true;
+    if (storedValue[0] != '\0' && !valueOk) preserveFile = true;
     headerIndex++;
   }
 
@@ -114,7 +119,7 @@ bool KOReaderCredentialStore::fromJson(JsonVariantConst doc) {
     needsResave = true;
   }
 
-  if (needsResave) {
+  if (needsResave && !preserveFile) {
     LOG_DBG("KRS", "Resaving KOReader credentials to update format");
     requestResave();
   }

@@ -27,6 +27,7 @@ bool LcpPassphraseStore::fromJson(JsonVariantConst doc) {
   JsonArrayConst arr = doc["passphrases"].as<JsonArrayConst>();
   entries.reserve(std::min(arr.size(), MAX_PROVIDERS));
   bool needsResave = false;
+  bool preserveFile = false;
   for (JsonObjectConst obj : arr) {
     if (entries.size() >= MAX_PROVIDERS) break;
     Entry entry;
@@ -35,12 +36,14 @@ bool LcpPassphraseStore::fromJson(JsonVariantConst doc) {
     bool ok = false;
     bool tooLong = false;
     bool legacy = false;
-    entry.userKeyHex = obfuscation::deobfuscateFromBase64(obj["key_obf"] | "", MAX_HASH_CHARS, &ok, &tooLong, &legacy);
+    const char* storedKey = obj["key_obf"] | "";
+    entry.userKeyHex = obfuscation::deobfuscateFromBase64(storedKey, MAX_HASH_CHARS, &ok, &tooLong, &legacy);
     if (legacy) needsResave = true;
+    if (storedKey[0] != '\0' && (!ok || tooLong)) preserveFile = true;
     if (entry.userKeyHex.empty()) continue;
     entries.push_back(std::move(entry));
   }
-  if (needsResave) requestResave();
+  if (needsResave && !preserveFile) requestResave();
   LOG_DBG("LCPPASS", "Loaded %zu LCP passphrase entries", entries.size());
   return true;
 }

@@ -36,6 +36,7 @@ bool WifiCredentialStore::fromJson(JsonVariantConst doc) {
   JsonArrayConst arr = doc["credentials"].as<JsonArrayConst>();
   credentials.reserve(std::min(arr.size(), MAX_NETWORKS));
   bool needsResave = false;
+  bool preserveFile = false;
 
   for (JsonObjectConst obj : arr) {
     if (credentials.size() >= MAX_NETWORKS) break;
@@ -60,7 +61,15 @@ bool WifiCredentialStore::fromJson(JsonVariantConst doc) {
     }
 
     bool passwordValid = false;
+    const char* storedObf = obj["password_obf"] | "";
     cred.password = extractPassword(obj, needsResave, MAX_PASSWORD_LENGTH, passwordValid);
+    // A non-empty blob that comes back empty was not decoded. Rewriting the
+    // file here would delete the network, including when the NVS key is missing.
+    if (passwordValid && storedObf[0] != '\0' && cred.password.empty()) {
+      LOG_ERR("WCS", "Leaving unread password for %s on the card", cred.ssid.c_str());
+      preserveFile = true;
+      continue;
+    }
     if (!passwordValid) {
       LOG_ERR("WCS", "Discarding oversized password for %s", cred.ssid.c_str());
       needsResave = true;
@@ -104,7 +113,7 @@ bool WifiCredentialStore::fromJson(JsonVariantConst doc) {
 
   LOG_DBG("WCS", "Loaded %zu WiFi credentials from file", credentials.size());
 
-  if (needsResave) {
+  if (needsResave && !preserveFile) {
     LOG_DBG("WCS", "Resaving JSON with obfuscated passwords");
     requestResave();
   }

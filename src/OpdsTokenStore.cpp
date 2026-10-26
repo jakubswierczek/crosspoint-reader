@@ -32,6 +32,7 @@ bool OpdsTokenStore::fromJson(JsonVariantConst doc) {
   JsonArrayConst arr = doc["tokens"].as<JsonArrayConst>();
   entries.reserve(std::min(arr.size(), MAX_SERVERS));
   bool needsResave = false;
+  bool preserveFile = false;
   for (JsonObjectConst obj : arr) {
     if (entries.size() >= MAX_SERVERS) break;
     Entry entry;
@@ -40,17 +41,23 @@ bool OpdsTokenStore::fromJson(JsonVariantConst doc) {
     bool ok = false;
     bool tooLong = false;
     bool legacy = false;
+    const char* storedAccess = obj["access_obf"] | "";
     entry.tokens.accessToken =
-        obfuscation::deobfuscateFromBase64(obj["access_obf"] | "", MAX_TOKEN_CHARS, &ok, &tooLong, &legacy);
+        obfuscation::deobfuscateFromBase64(storedAccess, MAX_TOKEN_CHARS, &ok, &tooLong, &legacy);
     if (legacy) needsResave = true;
+    if (storedAccess[0] != '\0' && (!ok || tooLong)) preserveFile = true;
     legacy = false;
+    ok = false;
+    tooLong = false;
+    const char* storedRefresh = obj["refresh_obf"] | "";
     entry.tokens.refreshToken =
-        obfuscation::deobfuscateFromBase64(obj["refresh_obf"] | "", MAX_TOKEN_CHARS, &ok, &tooLong, &legacy);
+        obfuscation::deobfuscateFromBase64(storedRefresh, MAX_TOKEN_CHARS, &ok, &tooLong, &legacy);
     if (legacy) needsResave = true;
+    if (storedRefresh[0] != '\0' && (!ok || tooLong)) preserveFile = true;
     entry.tokens.refreshUrl = obj["refresh_url"] | "";
     entries.push_back(std::move(entry));
   }
-  if (needsResave) requestResave();
+  if (needsResave && !preserveFile) requestResave();
   LOG_DBG("OPDSTOK", "Loaded %zu OPDS token entries", entries.size());
   return true;
 }
