@@ -48,6 +48,27 @@ This document shows common issues and possible solutions while using the device 
 4. Refresh the browser page and try again
 5. If WebSocket upload fails repeatedly, refresh the page and retry with the HTTP fallback path
 
+### HTTPS download or sync fails
+
+**Problem:** An update, OPDS catalog, or KOReader sync fails to connect, or a
+self-signed server never completes.
+
+**Solutions:**
+
+1. **Settings → System → Verify HTTPS certificates** is on by default. The
+   reader checks the server certificate against a small built-in set of public
+   roots (Let's Encrypt, DigiCert, Amazon, Google Trust Services, and Sectigo).
+2. A self-signed catalog or sync server is rejected while that toggle is on.
+   Turn it off to connect anyway. The connection stays encrypted; the reader
+   does not check the certificate. It does not turn the check off by itself
+   when a connection fails.
+3. Before the clock has been set, the reader still checks the signature and
+   the name, and ignores only the certificate dates. After the clock is in
+   2025 or later (a saved time, or a network time sync), dates are checked too.
+4. Checking a certificate needs more RAM than an unchecked handshake. If the
+   reader runs out of memory on the ESP32-C3 during a download, turn the
+   toggle off and try again.
+
 ### Saved Password Not Working
 
 **Problem:** Device fails to connect with saved credentials
