@@ -62,6 +62,20 @@ TEST(LibraryFold, LettersWithoutCanonicalDecomposition) {
   EXPECT_EQ(fold("s\xC5\x93ur"), "soeur");
 }
 
+TEST(LibraryFold, PolishLettersFoldToBaseLetters) {
+  // Search folds Polish letters onto the base letter. ł has no decomposition
+  // and is in the explicit map; ó, ś, ż, ź, ą, and ć decompose or combine.
+  EXPECT_EQ(fold("\xC5\x81\xC3\xB3"
+                 "d\xC5\xBA"),
+            "lodz");  // Łódź
+  EXPECT_EQ(fold("\xC5\x9A"
+                 "l\xC4\x85sk"),
+            "slask");                                           // Śląsk
+  EXPECT_EQ(fold("\xC5\xBB\xC3\xB3\xC5\x82\xC4\x87"), "zolc");  // Żółć
+  EXPECT_EQ(fold("a\xCC\xA8"), "a");                            // a + ogonek
+  EXPECT_EQ(fold("z\xCC\x87"), "z");                            // z + dot above
+}
+
 TEST(LibraryFold, ApostrophesSurviveInNamesAndElisions) {
   // U+2019 is what exporters actually emit; folding it to a space would split
   // "O'Malley" into two tokens and change both its sort place and its search.
