@@ -38,6 +38,8 @@
 #include "ProtectedPaths.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
+#include "WebAccess.h"
+#include "WebAccessCode.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
 #include "WifiPowerSaveGuard.h"
@@ -107,6 +109,8 @@ size_t wsUploadReceived = 0;
 unsigned long wsUploadStartTime = 0;
 bool wsUploadInProgress = false;
 uint8_t wsUploadClientNum = 255;  // 255 = no active upload client
+// Indexed by the WebSocket client number. The handshake URL must carry ?k=.
+bool wsClientAuthed[8] = {};
 size_t wsLastProgressSent = 0;
 String wsLastCompleteName;
 size_t wsLastCompleteSize = 0;
@@ -152,6 +156,139 @@ CrossPointWebServer::CrossPointWebServer() {}
 
 CrossPointWebServer::~CrossPointWebServer() { stop(); }
 
+namespace {
+
+const char* httpMethodName(HTTPMethod method) {
+  switch (method) {
+    case HTTP_GET:
+      return "GET";
+    case HTTP_HEAD:
+      return "HEAD";
+    case HTTP_POST:
+      return "POST";
+    case HTTP_PUT:
+      return "PUT";
+    case HTTP_DELETE:
+      return "DELETE";
+    case HTTP_OPTIONS:
+      return "OPTIONS";
+    case HTTP_PROPFIND:
+      return "PROPFIND";
+    case HTTP_MKCOL:
+      return "MKCOL";
+    case HTTP_MOVE:
+      return "MOVE";
+    case HTTP_COPY:
+      return "COPY";
+    case HTTP_LOCK:
+      return "LOCK";
+    case HTTP_UNLOCK:
+      return "UNLOCK";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+webaccess::State webAuthState;
+bool webApMode = false;
+
+webaccess::Decision evaluateWeb(WebServer& http, bool apMode, webaccess::State& state) {
+  webaccess::Credentials creds;
+  if (http.hasArg("k")) {
+    creds.hasQuery = true;
+    const String value = http.arg("k");
+    if (value.length() == webaccess::CODE_LEN) memcpy(creds.queryKey, value.c_str(), webaccess::CODE_LEN);
+  }
+  if (http.hasHeader("Cookie")) {
+    webaccess::copyCookieCode(http.header("Cookie").c_str(), creds.cookie, &creds.hasCookie);
+  }
+  if (http.hasHeader("Authorization")) {
+    const String authorization = http.header("Authorization");
+    webaccess::copyBearer(authorization.c_str(), creds.bearer, &creds.hasBearer);
+    if (!creds.hasBearer) {
+      webaccess::copyBasicPassword(authorization.c_str(), creds.basicPassword, &creds.hasBasic);
+    }
+  }
+
+  char staIp[16] = {};
+  char apIp[16] = {};
+  const char* allowed[3] = {};
+  size_t allowedCount = 0;
+  if (WiFi.status() == WL_CONNECTED) {
+    strncpy(staIp, WiFi.localIP().toString().c_str(), sizeof(staIp) - 1);
+    allowed[allowedCount++] = staIp;
+  }
+  if (apMode) {
+    strncpy(apIp, WiFi.softAPIP().toString().c_str(), sizeof(apIp) - 1);
+    allowed[allowedCount++] = apIp;
+  }
+  allowed[allowedCount++] = "crosspoint.local";
+
+  // Keep these alive: WebServer returns them by value.
+  const String path = http.uri();
+  const String host = http.hostHeader();
+  const String origin = http.hasHeader("Origin") ? http.header("Origin") : String();
+
+  webaccess::Request req;
+  req.method = httpMethodName(http.method());
+  req.path = path.c_str();
+  req.host = host.c_str();
+  req.origin = origin.length() ? origin.c_str() : nullptr;
+  req.credentials = &creds;
+  req.apMode = apMode;
+  req.nowMs = millis();
+  req.allowedHosts = allowed;
+  req.allowedHostCount = allowedCount;
+
+  return webaccess::decide(req, webAccessCode(), state);
+}
+
+bool gateWebRequest(WebServer& http, const Middleware::Callback& next, bool apMode) {
+  const String path = http.uri();
+  const char* code = webAccessCode();
+  const webaccess::Decision decision = evaluateWeb(http, apMode, webAuthState);
+  if (decision == webaccess::Decision::Allow) return next();
+
+  char cookie[48];
+  snprintf(cookie, sizeof(cookie), "cp=%s; Path=/; SameSite=Strict", code);
+  if (decision == webaccess::Decision::RedirectStripQuery) {
+    // The request target is echoed in Location. Refuse a scheme or network-path
+    // so a signed-in GET cannot be turned into a redirect off the device.
+    if (path.length() < 1 || path[0] != '/' || path[1] == '/' || path.indexOf("://") >= 0) {
+      http.send(400, "text/plain", "Bad path");
+      return true;
+    }
+    http.sendHeader("Set-Cookie", cookie);
+    http.sendHeader("Location", path);
+    http.send(302, "text/plain", "");
+    return true;
+  }
+  if (decision == webaccess::Decision::AllowSetCookie) {
+    http.sendHeader("Set-Cookie", cookie);
+    return next();
+  }
+  if (decision == webaccess::Decision::Locked) {
+    http.sendHeader("Retry-After", "30");
+    http.send(429, "text/plain", "Too many attempts");
+    return true;
+  }
+  if (decision == webaccess::Decision::Forbidden) {
+    http.send(403, "text/plain", "Forbidden");
+    return true;
+  }
+  http.sendHeader("WWW-Authenticate", "Basic realm=\"CrossPoint\"");
+  http.send(401, "text/plain", "Access code required");
+  return true;
+}
+
+}  // namespace
+
+bool webRequestMayWrite(WebServer& server) {
+  webaccess::State scratch = webAuthState;
+  const webaccess::Decision decision = evaluateWeb(server, webApMode, scratch);
+  return decision == webaccess::Decision::Allow || decision == webaccess::Decision::AllowSetCookie;
+}
+
 void CrossPointWebServer::begin() {
   if (running) {
     LOG_DBG("WEB", "Web server already running");
@@ -170,6 +307,7 @@ void CrossPointWebServer::begin() {
 
   // Store AP mode flag for later use (e.g., in handleStatus)
   apMode = isInApMode;
+  webApMode = apMode;
 
   LOG_DBG("WEB", "[MEM] Free heap before begin: %d bytes", ESP.getFreeHeap());
   LOG_DBG("WEB", "Network mode: %s", apMode ? "AP" : "STA");
@@ -273,12 +411,17 @@ void CrossPointWebServer::begin() {
 
   // Collect WebDAV headers and register handler
   // If-None-Match is collected so the static-page handlers can answer conditional GETs with 304
-  const char* collectedHeaders[] = {"Depth",      "Destination", "Overwrite",    "If",
-                                    "Lock-Token", "Timeout",     "If-None-Match"};
-  server->collectHeaders(collectedHeaders, 7);
+  const char* collectedHeaders[] = {"Depth",         "Destination", "Overwrite",     "If",    "Lock-Token", "Timeout",
+                                    "If-None-Match", "Cookie",      "Authorization", "Origin"};
+  server->collectHeaders(collectedHeaders, 10);
+  server->addMiddleware(
+      [this](WebServer& http, Middleware::Callback next) { return gateWebRequest(http, next, apMode); });
   server->addHandler(new WebDAVHandler());  // Note: WebDAVHandler will be deleted by WebServer when server is stopped
   LOG_DBG("WEB", "WebDAV handler initialized");
 
+  // Commit the access code on this task before the server accepts a client
+  // and before the render task paints it.
+  webAccessCode();
   server->begin();
 
   // Start WebSocket server for fast binary uploads
@@ -839,6 +982,13 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
   if (upload.status == UPLOAD_FILE_START) {
     // Reset watchdog - this is the critical 1% crash point
     resetTaskWatchdogIfSubscribed();
+    // The upload callback runs before middleware, so an anonymous body would
+    // already be on the card by the time the 401 is sent.
+    if (!webRequestMayWrite(*server)) {
+      state.success = false;
+      state.error = "Access code required";
+      return;
+    }
 
     state.fileName = upload.filename;
     state.size = 0;
@@ -2431,6 +2581,10 @@ void CrossPointWebServer::handlePluginFsUpload() {
 
   switch (part.status) {
     case UPLOAD_FILE_START: {
+      if (!webRequestMayWrite(*server)) {
+        fail(401, "Access code required");
+        return;
+      }
       if (st.file.isOpen()) st.file.close();
       st.path = server->arg("path").c_str();
       st.tmp.clear();
@@ -2683,6 +2837,7 @@ void CrossPointWebServer::wsEventCallback(uint8_t num, WStype_t type, uint8_t* p
 void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_DISCONNECTED:
+      if (num < 8) wsClientAuthed[num] = false;
       LOG_DBG("WS", "Client %u disconnected", num);
       // Only clean up if this is the client that owns the active upload.
       // A new client may have already started a fresh upload before this
@@ -2693,7 +2848,22 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
       break;
 
     case WStype_CONNECTED: {
-      LOG_DBG("WS", "Client %u connected", num);
+      char url[96];
+      url[0] = 0;
+      if (payload && length > 0) {
+        const size_t n = length < sizeof(url) - 1 ? length : sizeof(url) - 1;
+        memcpy(url, payload, n);
+        url[n] = 0;
+      }
+      char key[webaccess::CODE_LEN + 1];
+      bool present = false;
+      webaccess::copyQueryCode(url, key, &present);
+      const bool ok = num < 8 && present && key[0] && webaccess::codeEquals(key, webAccessCode());
+      if (num < 8) wsClientAuthed[num] = ok;
+      if (!ok) {
+        wsServer->sendTXT(num, "ERROR:Unauthorized");
+        wsServer->disconnect(num);
+      }
       break;
     }
 
@@ -2703,6 +2873,10 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
       LOG_DBG("WS", "Text from client %u: %s", num, msg.c_str());
 
       if (msg.startsWith("START:")) {
+        if (num >= 8 || !wsClientAuthed[num]) {
+          wsServer->sendTXT(num, "ERROR:Unauthorized");
+          return;
+        }
         // Reject any START while an upload is already active to prevent
         // leaking the open wsUploadFile handle (owning client re-START included)
         if (wsUploadInProgress) {
@@ -2914,7 +3088,7 @@ void CrossPointWebServer::handleFontUploadData() {
   switch (upload.status) {
     case UPLOAD_FILE_START: {
       resetTaskWatchdogIfSubscribed();
-      String family = server->arg("family");
+      if (fontUpload.file) fontUpload.file.close();
       fontUpload.file = HalFile();
       fontUpload.familyName.clear();
       fontUpload.filePath.clear();
@@ -2924,6 +3098,8 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.bytesWritten = 0;
       fontUpload.bufferPos = 0;
       fontUpload.buffer.reset();
+      if (!webRequestMayWrite(*server)) break;
+      String family = server->arg("family");
 
       if (!FontInstaller::isValidFamilyName(family.c_str())) {
         LOG_ERR("WEB", "Invalid font family name: %s", family.c_str());

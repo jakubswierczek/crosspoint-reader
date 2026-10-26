@@ -6,6 +6,7 @@
 
 #include "ClippingStore.h"
 #include "ProtectedPaths.h"
+#include "WebAccessCode.h"
 #include "util/BookCacheUtils.h"
 #include "util/TaskWatchdog.h"
 
@@ -49,6 +50,11 @@ bool WebDAVHandler::canRaw(WebServer& server, const String& uri) {
 void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
   (void)uri;
   if (raw.status == RAW_START) {
+    // raw() runs while the body is read, before middleware can reject the PUT.
+    if (!webRequestMayWrite(server)) {
+      _putOk = false;
+      return;
+    }
     _putPath = getRequestPath(server);
     if (isProtectedPath(_putPath)) {
       _putOk = false;

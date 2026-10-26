@@ -11,6 +11,51 @@ available while CrossPoint Reader is in File Transfer or Calibre Wireless mode.
 Examples use `crosspoint.local`. If mDNS does not resolve on your network, use
 the IP address shown on the device screen.
 
+## Authentication
+
+The access code is an 8-character value stored on the device and shown on the
+File Transfer and Calibre screens. These reads do not need it: `GET` or `HEAD`
+of `/`, `/files`, `/settings`, `/fonts`, `/plugins-run`, `/api/status`,
+`/assets/web.css`, `/assets/icons.svg`, `/assets/crosspoint-icon.svg`, and
+`/js/jszip.min.js`, plus `OPTIONS` (browser preflight). A path under `/js/` or
+`/assets/` that is not one of those files is not public. Every other request
+does, including download, upload, settings changes, OPDS and Wi-Fi changes,
+plugin routes, plugin jobs, and WebDAV.
+
+Send one of:
+
+- `Authorization: Bearer <code>`
+- `Authorization: Basic ...` where the password is the code and the username is ignored
+- Cookie `cp=<code>` (set when a browser opens `/?k=<code>`; the device redirects to the same path without the query)
+- Query `k=<code>`. On `GET` and `HEAD`, a valid `k` and no `Authorization` header answers `302` to the same path with the query removed and sets cookie `cp`. `GET /download?path=/Books/MyBook.epub&k=<code>` therefore comes back as `Location: /download`, and `path` is gone. `POST`, WebDAV `PUT`, and the other protected methods are served on that request and also set the cookie. `OPTIONS` stays public: a `k` on it does not set the cookie, and that presented code is counted as a wrong guess.
+
+A browser page that gets `401` can prompt for the code and reload with `?k=`.
+The WebSocket upload URL is `ws://<host>:81/?k=<code>`. A cookie or
+`Authorization` header is not accepted on that socket. The official Calibre
+wireless plugin has to send the query; the code is on the Calibre screen.
+The stock plugin does not, so Calibre wireless fails until the plugin is updated.
+
+The `Host` value that works is the station IP when the reader has joined a
+network, the hotspot IP when the access point is up, and `crosspoint.local` in
+either case. Comparison ignores case and a trailing `:80`. In hotspot mode,
+the shell reads (`GET`/`HEAD` of the public pages, plus every `OPTIONS`) skip
+that check. Every other request with a different `Host` is `403`, including
+one that has the right code.
+
+Eight wrong presented codes arm a device-wide 30-second lockout. During that
+window every non-public HTTP request is `429`, including a correct code. Shell
+reads with no `k` still succeed. A wrong `k` on a shell page counts toward
+the lockout. A correct `k` clears it and answers `302`. Once the lockout is
+already armed, a shell request that presents `k` is `429`. The WebSocket path
+does not use this counter.
+
+A cookie-authenticated request needs `Origin: http://` plus that same host for
+every method except `GET`, `HEAD`, and `OPTIONS`, including WebDAV `PROPFIND`.
+A missing or different origin is `403`. Bearer and Basic do not need `Origin`.
+
+Examples below that are not `GET /api/status` send `Authorization: Bearer CODE`.
+Replace `CODE` with the value on the reader.
+
 ## HTTP Pages
 
 | Method | Path | Purpose |
@@ -67,7 +112,7 @@ Response:
 Lists files and folders under a directory.
 
 ```bash
-curl "http://crosspoint.local/api/files?path=/Books"
+curl -H "Authorization: Bearer CODE" "http://crosspoint.local/api/files?path=/Books"
 ```
 
 Query parameters:
@@ -106,7 +151,7 @@ renamed, moved, or deleted, including over WebSocket. A plugin still writes
 Downloads a file from the SD card.
 
 ```bash
-curl -OJ "http://crosspoint.local/download?path=/Books/MyBook.epub"
+curl -H "Authorization: Bearer CODE" -OJ "http://crosspoint.local/download?path=/Books/MyBook.epub"
 ```
 
 Query parameters:
@@ -124,7 +169,7 @@ stores, and the plugin secret names above cannot be downloaded. EPUB files are s
 Uploads a file with HTTP multipart form data.
 
 ```bash
-curl -X POST -F "file=@mybook.epub" "http://crosspoint.local/upload?path=/Books"
+curl -H "Authorization: Bearer CODE" -X POST -F "file=@mybook.epub" "http://crosspoint.local/upload?path=/Books"
 ```
 
 Query parameters:
@@ -154,7 +199,7 @@ Notes:
 Creates a folder.
 
 ```bash
-curl -X POST -d "name=NewFolder&path=/" http://crosspoint.local/mkdir
+curl -H "Authorization: Bearer CODE" -X POST -d "name=NewFolder&path=/" http://crosspoint.local/mkdir
 ```
 
 Form parameters:
@@ -169,7 +214,7 @@ Form parameters:
 Renames a file.
 
 ```bash
-curl -X POST -d "path=/Books/old.epub&name=new.epub" http://crosspoint.local/rename
+curl -H "Authorization: Bearer CODE" -X POST -d "path=/Books/old.epub&name=new.epub" http://crosspoint.local/rename
 ```
 
 Form parameters:
@@ -187,7 +232,7 @@ cleared before the rename.
 Moves a file into an existing folder.
 
 ```bash
-curl -X POST -d "path=/Books/mybook.epub&dest=/Read" http://crosspoint.local/move
+curl -H "Authorization: Bearer CODE" -X POST -d "path=/Books/mybook.epub&dest=/Read" http://crosspoint.local/move
 ```
 
 Form parameters:
@@ -205,8 +250,8 @@ cleared before the move.
 Deletes one or more files or empty folders.
 
 ```bash
-curl -X POST -d "path=/Books/mybook.epub" http://crosspoint.local/delete
-curl -X POST -d 'paths=["/Books/old.epub","/OldFolder"]' http://crosspoint.local/delete
+curl -H "Authorization: Bearer CODE" -X POST -d "path=/Books/mybook.epub" http://crosspoint.local/delete
+curl -H "Authorization: Bearer CODE" -X POST -d 'paths=["/Books/old.epub","/OldFolder"]' http://crosspoint.local/delete
 ```
 
 Form parameters:
@@ -229,7 +274,7 @@ Returns a streamed JSON array of editable settings. Each item contains common
 fields plus type-specific fields.
 
 ```bash
-curl http://crosspoint.local/api/settings
+curl -H "Authorization: Bearer CODE" http://crosspoint.local/api/settings
 ```
 
 Example item:
@@ -267,7 +312,7 @@ The font-family setting includes SD-card font families when they are installed.
 Applies a partial settings update from a JSON object.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"fontSize":2,"showHiddenFiles":1}' \
   http://crosspoint.local/api/settings
@@ -288,7 +333,7 @@ these families appear with `sizes: [0]`. The `0` means that the font file has
 no fixed point size; the reader offers 12, 14, 16, and 18 pt.
 
 ```bash
-curl http://crosspoint.local/api/fonts
+curl -H "Authorization: Bearer CODE" http://crosspoint.local/api/fonts
 ```
 
 Response:
@@ -313,7 +358,7 @@ Response:
 Uploads one `.cpfont` file into a family folder.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -F "family=Literata" \
   -F "file=@Literata_12.cpfont" \
   http://crosspoint.local/api/fonts/upload
@@ -336,7 +381,7 @@ This endpoint removes family subfolders. To remove a loose TTF/OTF/TTC file
 from a font root, delete the file from the SD card instead.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"family":"Literata"}' \
   http://crosspoint.local/api/fonts/delete
@@ -355,7 +400,7 @@ Successful response:
 Lists saved OPDS servers. Passwords are never returned.
 
 ```bash
-curl http://crosspoint.local/api/opds
+curl -H "Authorization: Bearer CODE" http://crosspoint.local/api/opds
 ```
 
 Response:
@@ -378,7 +423,7 @@ Adds or updates an OPDS server. Include `index` to update an existing entry.
 If `password` is omitted during an update, the existing password is preserved.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"name":"My Catalog","url":"http://calibre.local:8080/opds","username":"reader","password":"secret"}' \
   http://crosspoint.local/api/opds
@@ -389,7 +434,7 @@ curl -X POST \
 Deletes an OPDS server by index.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"index":0}' \
   http://crosspoint.local/api/opds/delete
@@ -402,7 +447,7 @@ curl -X POST \
 Lists saved Wi-Fi networks. Passwords are never returned.
 
 ```bash
-curl http://crosspoint.local/api/wifi
+curl -H "Authorization: Bearer CODE" http://crosspoint.local/api/wifi
 ```
 
 Response:
@@ -425,7 +470,7 @@ entry. If `password` is omitted during an update, the existing password is
 preserved.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"ssid":"HomeWiFi","password":"secret"}' \
   http://crosspoint.local/api/wifi
@@ -436,7 +481,7 @@ curl -X POST \
 Deletes a saved Wi-Fi network by index.
 
 ```bash
-curl -X POST \
+curl -H "Authorization: Bearer CODE" -X POST \
   -H "Content-Type: application/json" \
   -d '{"index":0}' \
   http://crosspoint.local/api/wifi/delete
@@ -452,7 +497,7 @@ Calibre plugin workflows.
 Connection:
 
 ```text
-ws://crosspoint.local:81/
+ws://crosspoint.local:81/?k=CODE
 ```
 
 Protocol:
@@ -478,6 +523,7 @@ Error messages include:
 
 | Message | Cause |
 |---------|-------|
+| `ERROR:Unauthorized` | The handshake URL had no matching `k` query. The socket then closes. |
 | `ERROR:Upload already in progress` | A second upload was started before the first completed |
 | `ERROR:Invalid START format` | Malformed START message or invalid size token |
 | `ERROR:Failed to create file` | Destination file could not be opened |
@@ -662,7 +708,7 @@ stores opaque `{plugin, action, args}` blobs (fixed 6-slot pool; args/result
 ### `POST /api/plugin-jobs`
 
 ```bash
-curl -X POST http://crosspoint.local/api/plugin-jobs \
+curl -H "Authorization: Bearer CODE" -X POST http://crosspoint.local/api/plugin-jobs \
   -d '{"plugin":"<name>","action":"<action>","args":{"path":"/Books/somefile"}}'
 # -> {"id":3}         (503 {"error":"job queue full"} when all slots busy)
 ```
@@ -682,7 +728,7 @@ executor re-claimed the job) gets `409 {"error":"stale claim"}` and changes noth
 ### `GET /api/plugin-jobs/status?id=<n>`
 
 ```bash
-curl "http://crosspoint.local/api/plugin-jobs/status?id=3"
+curl -H "Authorization: Bearer CODE" "http://crosspoint.local/api/plugin-jobs/status?id=3"
 # -> {"id":3,"state":"done","result":{"title":"...","dest":"/Books/Book.epub"}}
 ```
 

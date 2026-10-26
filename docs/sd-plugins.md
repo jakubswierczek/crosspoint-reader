@@ -116,15 +116,15 @@ the browser context, and posts the result back.
 Flow for an external system:
 
 ```sh
-# 1. upload whatever the action needs (e.g. a file, via /upload)
+# 1. upload whatever the action needs (e.g. a file, via /upload, with Authorization: Bearer CODE)
 # 2. enqueue
-curl -X POST http://crosspoint.local/api/plugin-jobs \
+curl -H "Authorization: Bearer CODE" -X POST http://crosspoint.local/api/plugin-jobs \
   -d '{"plugin":"<name>","action":"<action>","args":{"path":"/folder/file"}}'
 # -> {"id":7}
 # 3. open http://crosspoint.local/plugins-run in a browser tab or hidden
 #    webview (jobs only execute while a hosting page is open)
 # 4. poll
-curl "http://crosspoint.local/api/plugin-jobs/status?id=7"
+curl -H "Authorization: Bearer CODE" "http://crosspoint.local/api/plugin-jobs/status?id=7"
 # -> {"id":7,"state":"done","result":{...}}
 ```
 

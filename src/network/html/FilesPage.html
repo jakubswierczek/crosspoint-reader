@@ -5596,7 +5596,9 @@ async function convertEpubFile(file, progressCallback) {
 // Get WebSocket URL based on current page location
 function getWsUrl() {
   const host = window.location.hostname;
-  return `ws://${host}:${WS_PORT}/`;
+  const match = document.cookie.match(/(?:^|; )cp=([^;]+)/);
+  const code = match ? decodeURIComponent(match[1]) : '';
+  return `ws://${host}:${WS_PORT}/` + (code ? `?k=${encodeURIComponent(code)}` : '');
 }
 
 // Upload file via WebSocket (faster, binary protocol)
