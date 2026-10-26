@@ -5,7 +5,7 @@
 
 #include <algorithm>
 
-void RecentBooksStore::toJson(JsonDocument& doc) const {
+bool RecentBooksStore::toJson(JsonDocument& doc) const {
   JsonArray arr = doc["books"].to<JsonArray>();
   for (const auto& book : recentBooks) {
     JsonObject obj = arr.add<JsonObject>();
@@ -14,6 +14,7 @@ void RecentBooksStore::toJson(JsonDocument& doc) const {
     obj["author"] = book.author;
     obj["coverBmpPath"] = book.coverBmpPath;
   }
+  return true;
 }
 
 bool RecentBooksStore::fromJson(JsonVariantConst doc) {

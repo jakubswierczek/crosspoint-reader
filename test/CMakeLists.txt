@@ -90,6 +90,7 @@ add_subdirectory(plugin_manifest_classification)
 add_subdirectory(plugin_picker_layout)
 add_subdirectory(protected_paths)
 add_subdirectory(hotspot_password)
+add_subdirectory(obfuscation_codec)
 add_subdirectory(plugin_relay)
 add_subdirectory(web_access)
 

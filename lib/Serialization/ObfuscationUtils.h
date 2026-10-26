@@ -6,12 +6,13 @@
 #include <cstdint>
 #include <string>
 
+#include "ObfuscationCodec.h"
+
 /**
- * Credential obfuscation utilities using the ESP32's unique hardware MAC address.
- *
- * XOR-based obfuscation with the 6-byte eFuse MAC as key. Not cryptographically
- * secure, but prevents casual reading of credentials on the SD card and ties
- * obfuscated data to the specific device (cannot be decoded on another chip or PC).
+ * Credential obfuscation. New blobs are XOR'd with a random 16-byte NVS key and
+ * stored as "v2." plus base64. Older blobs (MAC key, no prefix) still decode.
+ * This is not cryptography: it keeps a copied SD card from being readable on
+ * another machine. The NVS key does not travel with the card.
  *
  */
 namespace obfuscation {
@@ -22,16 +23,20 @@ void xorTransform(std::string& data);
 // Legacy overload for binary migration (uses the old per-store hardcoded keys)
 void xorTransform(std::string& data, const uint8_t* key, size_t keyLen);
 
-// Obfuscate a plaintext string: XOR with hardware key, then base64-encode for JSON storage
-String obfuscateToBase64(const std::string& plaintext);
+// Obfuscate a plaintext string for JSON storage. Writes only the "v2." form.
+// Returns false when the NVS key cannot be read or created; out is left unchanged
+// so the caller can skip the save. Empty plaintext returns true and clears out.
+bool obfuscateToBase64(const std::string& plaintext, String& out);
 
 // Decode base64 and de-obfuscate back to plaintext.
 // Returns empty string on invalid base64 input; sets *ok to false if decode fails.
-std::string deobfuscateFromBase64(const char* encoded, bool* ok = nullptr);
+// *legacy is set from shouldUpgradeStoredForm after a successful decode.
+std::string deobfuscateFromBase64(const char* encoded, bool* ok = nullptr, bool* legacy = nullptr);
 
 // Bounded variant. Rejects decoded output larger than maxDecodedLength before
 // allocating its result buffer and reports that case through tooLong.
-std::string deobfuscateFromBase64(const char* encoded, size_t maxDecodedLength, bool* ok, bool* tooLong);
+std::string deobfuscateFromBase64(const char* encoded, size_t maxDecodedLength, bool* ok, bool* tooLong,
+                                  bool* legacy = nullptr);
 
 // Self-test: verifies round-trip obfuscation with hardware key. Logs PASS/FAIL.
 void selfTest();

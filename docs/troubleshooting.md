@@ -48,6 +48,22 @@ This document shows common issues and possible solutions while using the device 
 4. Refresh the browser page and try again
 5. If WebSocket upload fails repeatedly, refresh the page and retry with the HTTP fallback path
 
+### Saved passwords disappear after installing older firmware
+
+**Problem:** Wi-Fi, OPDS, or sync passwords that worked on this firmware are
+empty after you flash an older build.
+
+**Solutions:**
+
+1. This firmware rewrites those saved secrets so they start with `v2.`. That
+   prefix is not valid base64, so an older build fails the decode and treats
+   the password as empty. Enter the password again on the version you are
+   running.
+2. The rewritten value stays on the SD card. The key that reads it stays in
+   the reader's internal storage, not on the card, so copying the card does
+   not reveal the password. The same reader still has that key after a
+   downgrade, but older firmware never uses it.
+
 ### Saved Password Not Working
 
 **Problem:** Device fails to connect with saved credentials
