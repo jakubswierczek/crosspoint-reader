@@ -60,4 +60,23 @@ function showWebToast(message, isError) {
   webToast.style.display = 'block';
   webToastTimeout = setTimeout(() => { webToast.style.display = 'none'; }, 4000);
 }
+
+// The shell pages load without the access code. The first API call answers 401
+// until the code shown on the reader is entered; that reloads with ?k= so the
+// device can set the cp cookie used by later requests and the WebSocket.
+let cpAccessPrompted = false;
+const cpFetch = window.fetch.bind(window);
+window.fetch = function(input, init) {
+  return cpFetch(input, init).then(resp => {
+    if (resp.status === 401 && !cpAccessPrompted) {
+      cpAccessPrompted = true;
+      const code = window.prompt('Enter the access code shown on the reader');
+      if (code) {
+        const path = window.location.pathname || '/';
+        window.location.replace(path + '?k=' + encodeURIComponent(code.trim()));
+      }
+    }
+    return resp;
+  });
+};
 </script>

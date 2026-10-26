@@ -5,7 +5,9 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 
 struct ZipInflateCtx {
   HalFile* file = nullptr;
@@ -404,8 +406,16 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
   file.seek(fileOffset);
 
   const auto deflatedDataSize = fileStat.compressedSize;
-  const auto inflatedDataSize = fileStat.uncompressedSize;
-  const auto dataSize = trailingNullByte ? inflatedDataSize + 1 : inflatedDataSize;
+  const uint32_t inflatedDataSize = fileStat.uncompressedSize;
+  // The central-directory size is a uint32. Adding the trailing NUL in that
+  // width wraps 0xFFFFFFFF to 0, and malloc(0) may still return a pointer the
+  // following read would write past. Reject before allocating.
+  const uint32_t extraByte = trailingNullByte ? 1u : 0u;
+  if (inflatedDataSize > std::numeric_limits<uint32_t>::max() - extraByte) {
+    LOG_ERR("ZIP", "Rejected oversized entry %s (%u bytes)", filename, inflatedDataSize);
+    return nullptr;
+  }
+  const size_t dataSize = static_cast<size_t>(inflatedDataSize) + extraByte;
   const auto data = static_cast<uint8_t*>(malloc(dataSize));
   if (data == nullptr) {
     LOG_ERR("ZIP", "Failed to allocate memory for output buffer (%zu bytes)", dataSize);

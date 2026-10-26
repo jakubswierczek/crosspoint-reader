@@ -63,7 +63,7 @@ class KOReaderCredentialStore : public PersistableStore<KOReaderCredentialStore>
   static constexpr size_t MAX_CUSTOM_HEADERS = KOREADER_MAX_CUSTOM_HEADERS;
 
   static const char* getFilePath() { return "/.crosspoint/koreader.json"; }
-  void toJson(JsonDocument& doc) const;
+  bool toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 
   // Credential management

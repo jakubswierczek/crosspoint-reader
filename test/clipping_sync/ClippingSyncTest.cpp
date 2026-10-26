@@ -13,6 +13,10 @@
 #include "BuildScratch.h"
 #include "clippings/ClippingSync.h"
 
+// The device function lives in TlsTrust.cpp and reads settings. This test only
+// checks the sync body, so verification stays off.
+void applyTlsTrust(freeink::SecureHttpClient& http) { http.setInsecure(); }
+
 namespace {
 constexpr const char* book = "/book.epub";
 std::vector<uint8_t> framebuffer(52272);

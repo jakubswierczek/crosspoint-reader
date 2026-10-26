@@ -92,7 +92,11 @@ firmware surfaces: the job queue and the `device.json` on-device screens.
 ## Surface 1: browser plugins (`plugin.js`)
 
 JS loaded into the File Manager or Settings web page, backed by generic device
-endpoints (`/api/relay`, `/api/crypto`, `/api/fetch`, `/api/plugin-fs`). See
+endpoints (`/api/relay`, `/api/crypto`, `/api/fetch`, `/api/plugin-fs`).
+`/api/relay` and `/api/fetch` accept only `http` and `https` URLs with no
+userinfo, and they refuse loopback, the whole `0.0.0.0/8` block, the IPv6
+unspecified address (`::`), and link-local targets. A private LAN address is
+allowed. The `plugin` field must be an installed plugin. See
 `docs/webserver-endpoints.md` for the endpoints and the sd-plugins repository
 for the JS contract.
 
@@ -116,15 +120,15 @@ the browser context, and posts the result back.
 Flow for an external system:
 
 ```sh
-# 1. upload whatever the action needs (e.g. a file, via /upload)
+# 1. upload whatever the action needs (e.g. a file, via /upload, with Authorization: Bearer CODE)
 # 2. enqueue
-curl -X POST http://crosspoint.local/api/plugin-jobs \
+curl -H "Authorization: Bearer CODE" -X POST http://crosspoint.local/api/plugin-jobs \
   -d '{"plugin":"<name>","action":"<action>","args":{"path":"/folder/file"}}'
 # -> {"id":7}
 # 3. open http://crosspoint.local/plugins-run in a browser tab or hidden
 #    webview (jobs only execute while a hosting page is open)
 # 4. poll
-curl "http://crosspoint.local/api/plugin-jobs/status?id=7"
+curl -H "Authorization: Bearer CODE" "http://crosspoint.local/api/plugin-jobs/status?id=7"
 # -> {"id":7,"state":"done","result":{...}}
 ```
 
@@ -235,7 +239,8 @@ JSON catalogs may also map `description`, `detail_author`, and `repository` for 
   "title": "Service Name",                  // menu label; defaults to folder name
 
   // Relative paths are in the plugin's own folder; absolute paths work too.
-  // The credential stores (wifi/opds/koreader .json) are refused.
+  // The credential stores (wifi, opds, koreader, opds_tokens,
+  // lcp_passphrases, and lcp_device) are refused.
   "token": {                                // omit for token-less catalogs
     "file": "token.json",                   // written by auth (either side)
     "path": "token"                         // dotted JSON path inside the file

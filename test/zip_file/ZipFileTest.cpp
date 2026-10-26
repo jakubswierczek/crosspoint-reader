@@ -47,6 +47,14 @@ class ZipBuilder {
     return *this;
   }
 
+  // `declaredSize` is what the central directory claims. It can disagree with
+  // the bytes that follow, which is how a wrapped allocation is reached.
+  ZipBuilder& addStoredDeclared(const std::string& name, const std::string& content, uint32_t declaredSize) {
+    entries.push_back(
+        {name, std::vector<uint8_t>(content.begin(), content.end()), declaredSize, METHOD_STORED, "", "", 0});
+    return *this;
+  }
+
   ZipBuilder& addDeflated(const std::string& name, const std::vector<uint8_t>& raw, uint32_t uncompressedSize) {
     entries.push_back({name, raw, uncompressedSize, METHOD_DEFLATED, "", "", 0});
     return *this;
@@ -185,6 +193,17 @@ TEST_F(ZipFileTest, ReportsSizesForStoredAndDeflatedEntries) {
   ZipFile zip(path);
   EXPECT_EQ(sizeOf(zip, "mimetype"), 20u);
   EXPECT_EQ(sizeOf(zip, "OEBPS/chapter.xhtml"), DEFLATED_TEXT.size());
+}
+
+TEST_F(ZipFileTest, RejectsUncompressedSizeThatWrapsWithTrailingNul) {
+  ZipBuilder builder;
+  builder.addStoredDeclared("OEBPS/chapter.xhtml", "x", 0xFFFFFFFFu);
+  install(builder);
+
+  ZipFile zip(path);
+  size_t size = 123;
+  EXPECT_EQ(nullptr, zip.readFileToMemory("OEBPS/chapter.xhtml", &size, true));
+  EXPECT_EQ(123u, size);
 }
 
 TEST_F(ZipFileTest, ExtractsStoredAndDeflatedEntriesToMemory) {

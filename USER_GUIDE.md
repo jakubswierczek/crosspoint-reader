@@ -180,7 +180,7 @@ If you don't already have the plugin installed:
 3. In Plugins search for "crosspoint".
 4. Click on "Customize plugin".
 5. Update the value for "Host" to match the IP for your device.
-6. Leave the other settings as they are.
+6. The Calibre screen on the reader shows an access code. The current official plugin does not send it, so wireless upload is refused until the plugin opens `ws://<host>:81/?k=<code>`. The code is also what the file-transfer web API expects as `Authorization: Bearer <code>`.
 7. [optional] Modify the "Upload path" to point to a subfolder other than the root "/" folder. Enter this as a path relative to the root folder. Example: `/mybooks`
 8. Restart Calibre.
 
@@ -190,7 +190,7 @@ If you don't already have the plugin installed:
 
 To upload a book using the CrossPoint plugin in Calibre:
 
-1. On the device: File Transfer -> Calibre Wireless, then join a network.
+1. On the device: File Transfer -> Calibre Wireless, then join a network. Read the access code on that screen. The official plugin does not send it yet, so this upload fails until the plugin uses `ws://<host>:81/?k=<code>`.
 2. Select one or more books.
 3. Right-click on that selection.
 4. Select "Send to Device" > "Send to main memory"

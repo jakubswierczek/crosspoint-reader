@@ -28,7 +28,7 @@ class RecentBooksStore : public PersistableStore<RecentBooksStore> {
 
  public:
   static const char* getFilePath() { return "/.crosspoint/recent.json"; }
-  void toJson(JsonDocument& doc) const;
+  bool toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 
   // Add a book to the recent list (moves to front if already exists)

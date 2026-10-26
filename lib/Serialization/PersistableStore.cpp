@@ -45,7 +45,9 @@ std::string PersistableStoreBase::extractPassword(JsonVariantConst doc, bool& ne
   valid = true;
   bool ok = false;
   bool tooLong = false;
-  std::string pass = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", maxLength, &ok, &tooLong);
+  bool legacy = false;
+  std::string pass = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", maxLength, &ok, &tooLong, &legacy);
+  if (legacy) needsResave = true;
   if (tooLong) {
     valid = false;
     return "";

@@ -11,6 +11,7 @@
 #include "WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/WebAccessCode.h"
 #include "util/TaskWatchdog.h"
 
 namespace {
@@ -201,7 +202,10 @@ void CalibreConnectActivity::render(RenderLock&&) {
     renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, y + height * 2, tr(STR_CALIBRE_INSTRUCTION_3));
     renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, y + height * 3, tr(STR_CALIBRE_INSTRUCTION_4));
 
-    y += height * 3 + metrics.verticalSpacing * 4;
+    y += height * 3 + metrics.verticalSpacing;
+    std::string accessLine = std::string(tr(STR_ACCESS_CODE)) + " " + webAccessCode();
+    renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, y, accessLine.c_str(), true, EpdFontFamily::BOLD);
+    y += renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing * 2;
     renderer.drawText(UI_12_FONT_ID, metrics.contentSidePadding, y, tr(STR_CALIBRE_STATUS), true, EpdFontFamily::BOLD);
     y += heightText12 + metrics.verticalSpacing * 2;
 
