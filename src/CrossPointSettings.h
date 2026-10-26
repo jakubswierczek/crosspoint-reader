@@ -352,6 +352,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // this disabled; settings migration enables it when pre-existing plugin files
   // are found so a firmware update never silently disables an existing setup.
   uint8_t pluginsEnabled = 0;
+  // Check HTTPS server certificates against the built-in CA bundle. Off leaves
+  // the connection encrypted and skips the check, for a self-signed server.
+  // A failed check does not fall back to skipping it.
+  uint8_t tlsVerify = 1;
   // User hid the Plugin Hub install row; cleared when plugins are turned back on.
   uint8_t pluginHubPromptHidden = 0;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
