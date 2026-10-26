@@ -2120,6 +2120,84 @@ TEST_F(ChapterHtmlSlimParserTest, PolishSingleLetterWordStaysWithTheNextWord) {
     ASSERT_EQ(dotted.size(), 2u);
     EXPECT_EQ(dotted[0], (std::vector<std::string>{"aa", "w."}));
     EXPECT_EQ(dotted[1], (std::vector<std::string>{"domu"}));
+
+    // The space stays outside the link. The linked word can still hyphenate with it.
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, BlockStyle(), 0);
+    parser.polishGlueArmed = false;
+    ChapterHtmlSlimParser::characterData(&parser, "i ", 2);
+    const XML_Char* linkAttrs[] = {"href", "#n", nullptr};
+    ChapterHtmlSlimParser::startElement(&parser, "a", linkAttrs);
+    ChapterHtmlSlimParser::characterData(&parser, "domu", 4);
+    ChapterHtmlSlimParser::endElement(&parser, "a");
+    if (parser.partWordBufferIndex > 0) parser.flushPartWordBuffer();
+    ASSERT_EQ(parser.currentTextBlock->size(), 3u);
+    EXPECT_EQ(parser.currentTextBlock->wordAt(0), "i");
+    EXPECT_EQ(parser.currentTextBlock->wordAt(1), " ");
+    EXPECT_EQ(parser.currentTextBlock->wordAt(2), "domu");
+    EXPECT_EQ(static_cast<uint8_t>(parser.currentTextBlock->getWordStyleAt(1)) &
+                  static_cast<uint8_t>(EpdFontFamily::UNDERLINE),
+              0u);
+    EXPECT_NE(static_cast<uint8_t>(parser.currentTextBlock->getWordStyleAt(2)) &
+                  static_cast<uint8_t>(EpdFontFamily::UNDERLINE),
+              0u);
+    EXPECT_EQ(parser.currentTextBlock->wordLinkIds[1], 0);
+    EXPECT_NE(parser.currentTextBlock->wordLinkIds[2], 0);
+    EXPECT_TRUE(parser.currentTextBlock->wordContinuesAt(1));
+    EXPECT_TRUE(parser.currentTextBlock->wordContinuesAt(2));
+    EXPECT_FALSE(parser.currentTextBlock->wordNoSpaceBefore[1]);
+
+    const XML_Char* sizeAttrs[] = {"style", "font-size: 200%", nullptr};
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, BlockStyle(), 0);
+    parser.polishGlueArmed = false;
+    ChapterHtmlSlimParser::characterData(&parser, "i ", 2);
+    ChapterHtmlSlimParser::startElement(&parser, "span", sizeAttrs);
+    ChapterHtmlSlimParser::characterData(&parser, "do", 2);
+    ChapterHtmlSlimParser::endElement(&parser, "span");
+    if (parser.partWordBufferIndex > 0) parser.flushPartWordBuffer();
+    ASSERT_EQ(parser.currentTextBlock->size(), 3u);
+    EXPECT_EQ(parser.currentTextBlock->wordSizeSlots[1], 0);
+    EXPECT_NE(parser.currentTextBlock->wordSizeSlots[2], 0);
+
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, BlockStyle(), 0);
+    parser.polishGlueArmed = false;
+    ChapterHtmlSlimParser::characterData(&parser, "aaaa ", 5);
+    ChapterHtmlSlimParser::startElement(&parser, "em", nullptr);
+    ChapterHtmlSlimParser::characterData(&parser, "i", 1);
+    ChapterHtmlSlimParser::endElement(&parser, "em");
+    ChapterHtmlSlimParser::characterData(&parser, " domu", 5);
+    const auto tagged = layout(48);
+    ASSERT_EQ(tagged.size(), 2u);
+    EXPECT_EQ(tagged[0], (std::vector<std::string>{"aaaa"}));
+    EXPECT_EQ(tagged[1], (std::vector<std::string>{"i", " ", "domu"}));
+
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, BlockStyle(), 0);
+    parser.polishGlueArmed = false;
+    // Inside a paragraph, depth is above the body. Closing <em> at depth 1 does not continue.
+    parser.depth = 2;
+    ChapterHtmlSlimParser::startElement(&parser, "em", nullptr);
+    ChapterHtmlSlimParser::characterData(&parser, "w", 1);
+    ChapterHtmlSlimParser::endElement(&parser, "em");
+    ChapterHtmlSlimParser::characterData(&parser, "ord", 3);
+    if (parser.partWordBufferIndex > 0) parser.flushPartWordBuffer();
+    ASSERT_EQ(parser.currentTextBlock->size(), 2u);
+    EXPECT_EQ(parser.currentTextBlock->wordAt(0), "w");
+    EXPECT_EQ(parser.currentTextBlock->wordAt(1), "ord");
+    EXPECT_TRUE(parser.currentTextBlock->wordContinuesAt(1));
+
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, BlockStyle(), 0);
+    parser.polishGlueArmed = false;
+    ChapterHtmlSlimParser::characterData(&parser, "w", 1);
+    ChapterHtmlSlimParser::startElement(&parser, "em", nullptr);
+    ChapterHtmlSlimParser::characterData(&parser, "i", 1);
+    ChapterHtmlSlimParser::endElement(&parser, "em");
+    ChapterHtmlSlimParser::characterData(&parser, " domu", 5);
+    if (parser.partWordBufferIndex > 0) parser.flushPartWordBuffer();
+    ASSERT_EQ(parser.currentTextBlock->size(), 3u);
+    EXPECT_EQ(parser.currentTextBlock->wordAt(0), "w");
+    EXPECT_EQ(parser.currentTextBlock->wordAt(1), "i");
+    EXPECT_EQ(parser.currentTextBlock->wordAt(2), "domu");
+    EXPECT_TRUE(parser.currentTextBlock->wordContinuesAt(1));
+    EXPECT_FALSE(parser.currentTextBlock->wordContinuesAt(2));
   }
 }
 
