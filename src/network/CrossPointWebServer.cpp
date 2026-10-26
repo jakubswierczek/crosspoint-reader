@@ -600,6 +600,7 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<void(F
   }
 
   LOG_DBG("WEB", "Scanning files in: %s", path);
+  const bool credentialDir = protectedpaths::isCredentialStoreDir(path);
 
   HalFile file = root.openNextFile();
   char name[500];
@@ -619,6 +620,11 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<void(F
         }
       }
     }
+
+    // Secret basenames stay out of the listing. Checked on the name so a large
+    // folder does not allocate a canonical path per entry.
+    if (!shouldHide && protectedpaths::isNetworkSecretName(name)) shouldHide = true;
+    if (!shouldHide && credentialDir && protectedpaths::isCredentialFileName(name)) shouldHide = true;
 
     if (!shouldHide) {
       FileInfo info;
@@ -655,6 +661,10 @@ void CrossPointWebServer::handleFileListData() const {
   String currentPath = "/";
   if (server->hasArg("path")) {
     currentPath = normalizeWebPath(server->arg("path"));
+  }
+  if (protectedpaths::isNetworkDeniedPath(currentPath.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
+    return;
   }
 
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
@@ -734,7 +744,7 @@ void CrossPointWebServer::handleDownload() const {
   }
 
   const String itemName = itemPath.substring(itemPath.lastIndexOf('/') + 1);
-  if (itemName.startsWith(".") || protectedpaths::isSensitivePath(itemPath.c_str())) {
+  if (itemName.startsWith(".") || protectedpaths::isNetworkDeniedPath(itemPath.c_str())) {
     server->send(403, "text/plain", "Cannot access system files");
     return;
   }
@@ -862,7 +872,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     String filePath = state.path;
     if (!filePath.endsWith("/")) filePath += "/";
     filePath += state.fileName;
-    if (protectedpaths::isSensitivePath(filePath.c_str())) {
+    if (protectedpaths::isNetworkDeniedPath(filePath.c_str())) {
       state.error = "Cannot write protected items";
       return;
     }
@@ -1100,7 +1110,7 @@ void CrossPointWebServer::handleRename() const {
     newPath += "/";
   }
   newPath += newName;
-  if (protectedpaths::isSensitivePath(itemPath.c_str()) || protectedpaths::isSensitivePath(newPath.c_str())) {
+  if (protectedpaths::isNetworkDeniedPath(itemPath.c_str()) || protectedpaths::isNetworkDeniedPath(newPath.c_str())) {
     file.close();
     server->send(403, "text/plain", "Cannot move protected item");
     return;
@@ -1193,7 +1203,7 @@ void CrossPointWebServer::handleMove() const {
     newPath += "/";
   }
   newPath += itemName;
-  if (protectedpaths::isSensitivePath(itemPath.c_str()) || protectedpaths::isSensitivePath(newPath.c_str())) {
+  if (protectedpaths::isNetworkDeniedPath(itemPath.c_str()) || protectedpaths::isNetworkDeniedPath(newPath.c_str())) {
     file.close();
     server->send(403, "text/plain", "Cannot move protected item");
     return;
@@ -1278,7 +1288,7 @@ void CrossPointWebServer::handleDelete() const {
     const String itemName = itemPath.substring(itemPath.lastIndexOf('/') + 1);
 
     // Credential stores are protected. Hidden (dot-named) items can be deleted.
-    if (protectedpaths::isSensitivePath(itemPath.c_str())) {
+    if (protectedpaths::isNetworkDeniedPath(itemPath.c_str())) {
       failedItems += itemPath + " (protected file); ";
       allSuccess = false;
       continue;
@@ -1922,6 +1932,10 @@ void CrossPointWebServer::handlePluginFile() const {
   const String file = server->arg("file");
   if (!safeComponent(name) || !safeComponent(file)) {
     server->send(400, "text/plain", "bad plugin path");
+    return;
+  }
+  if (protectedpaths::isNetworkSecretName(file.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
     return;
   }
   const std::string pluginDir = PluginLocations::findPluginDir(name.c_str());
@@ -2728,7 +2742,7 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
           String filePath = wsUploadPath;
           if (!filePath.endsWith("/")) filePath += "/";
           filePath += wsUploadFileName;
-          if (protectedpaths::isSensitivePath(filePath.c_str())) {
+          if (protectedpaths::isNetworkDeniedPath(filePath.c_str())) {
             wsServer->sendTXT(num, "ERROR:Cannot write protected items");
             return;
           }
