@@ -619,9 +619,15 @@ to CORS). Body: `{"plugin":"<name>","method":"GET","url":"https://...","headers"
 - **Redirects** are not followed: a 3xx comes back with its `location` header.
 - **Limits:** the upstream body is capped at 32KB; larger payloads belong on
   `/api/fetch`.
-- **Errors:** `400 {"error":"missing plugin/url"}`; `502 {"error":"relay failed; ..."}`
-  for a transport failure, a truncated body, a body over the cap, or low memory
-  (the device log names which).
+- `plugin` must name an installed plugin. `url` must be `http` or `https`,
+  without a username or password in the URL. Loopback, the whole
+  `0.0.0.0/8` block, the IPv6 unspecified address (`::`), and link-local
+  addresses (`169.254.0.0/16`, `fe80::/10`) are refused. A private LAN address
+  is still allowed. The check looks at the URL text.
+- **Errors:** `403 {"error":"plugin not installed"}` when the name is missing
+  or not installed; `400 {"error":"url not allowed"}` when the URL is refused;
+  `502 {"error":"relay failed; ..."}` for a transport failure, a truncated
+  body, a body over the cap, or low memory (the device log names which).
 
 ### `POST /api/crypto`
 
@@ -659,7 +665,11 @@ be edited. The reader enforces `expires` when the book opens.
 Downloads a URL straight to SD, so a large body never passes through the
 browser. Body: `{"plugin":"<name>","url":"...","dest":"/abs/path","headers":{...},"offset":0,"maxBytes":0}`.
 
-- `dest` must be absolute with no `..`; missing parent folders are created.
+- `plugin` must name an installed plugin, same rule as `/api/relay`.
+- `url` follows the same `http`/`https` rule as `/api/relay`. A redirect target
+  is not checked again (at most five hops).
+- `dest` must be absolute with no `..` and must not be a credential store;
+  missing parent folders are created.
 - The transfer is staged in `<dest>.part` and replaces `dest` only when the
   whole body has arrived, so a failed update keeps the previous file.
 - Installing a book file (`.epub`, `.txt`, `.md`, `.xtc`) marks the Library
@@ -679,7 +689,8 @@ browser. Body: `{"plugin":"<name>","url":"...","dest":"/abs/path","headers":{...
 - **Result:** `{"status":200,"bytes":N,"complete":true,"total":N}` (`total`
   when the server reported a size). `error` is set to `transport failure`,
   `http status`, or `sd write failed` when the file was not installed.
-- **Errors:** `400 {"error":"bad url/dest"}`; `409 {"error":"offset mismatch","bytes":N}`
+- **Errors:** `403 {"error":"plugin not installed"}`; `400 {"error":"url not allowed"}`
+  or `400 {"error":"bad url/dest"}`; `409 {"error":"offset mismatch","bytes":N}`
   when `offset` does not match the `.part` size; `502 {"error":"sd write failed" |
   "range unsupported" | "download truncated","bytes":N,"complete":false}`.
 

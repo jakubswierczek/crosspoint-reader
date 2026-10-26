@@ -92,7 +92,11 @@ firmware surfaces: the job queue and the `device.json` on-device screens.
 ## Surface 1: browser plugins (`plugin.js`)
 
 JS loaded into the File Manager or Settings web page, backed by generic device
-endpoints (`/api/relay`, `/api/crypto`, `/api/fetch`, `/api/plugin-fs`). See
+endpoints (`/api/relay`, `/api/crypto`, `/api/fetch`, `/api/plugin-fs`).
+`/api/relay` and `/api/fetch` accept only `http` and `https` URLs with no
+userinfo, and they refuse loopback, the whole `0.0.0.0/8` block, the IPv6
+unspecified address (`::`), and link-local targets. A private LAN address is
+allowed. The `plugin` field must be an installed plugin. See
 `docs/webserver-endpoints.md` for the endpoints and the sd-plugins repository
 for the JS contract.
 
