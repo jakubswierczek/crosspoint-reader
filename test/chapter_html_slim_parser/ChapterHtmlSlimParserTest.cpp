@@ -21,6 +21,7 @@
 
 #define class struct
 #define private public
+#include "Epub/hyphenation/Hyphenator.h"
 #include "Epub/parsers/ChapterHtmlSlimParser.h"
 #undef private
 #undef class
@@ -2034,6 +2035,91 @@ TEST(TextDecorationPosition, StrikeUsesGlyphBodyAndFollowsScriptScaling) {
       const int expected = script == EpdFontFamily::SUP ? 26 : script == EpdFontFamily::SUB ? 33 : 27;
       EXPECT_EQ(renderer.lastLineY, expected);
     });
+  }
+}
+
+TEST_F(ChapterHtmlSlimParserTest, PolishSingleLetterWordStaysWithTheNextWord) {
+  auto layout = [&](const int width) {
+    if (parser.partWordBufferIndex > 0) parser.flushPartWordBuffer();
+    std::vector<std::vector<std::string>> lines;
+    if (!parser.currentTextBlock) return lines;
+    parser.currentTextBlock->layoutAndExtractLines(renderer, 0, static_cast<uint16_t>(width),
+                                                   [&](std::unique_ptr<TextBlock> line, uint32_t) {
+                                                     std::vector<std::string> words;
+                                                     words.reserve(line->wordCount());
+                                                     for (uint16_t i = 0; i < line->wordCount(); ++i)
+                                                       words.emplace_back(line->wordText(i));
+                                                     lines.push_back(std::move(words));
+                                                   });
+    return lines;
+  };
+
+  auto feed = [&](const char* text) {
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, BlockStyle(), 0);
+    // Replacing the block skips startNewTextBlock, which drops a pending space.
+    parser.polishGlueArmed = false;
+    ChapterHtmlSlimParser::characterData(&parser, text, static_cast<int>(strlen(text)));
+  };
+
+  struct PolishBookLanguage {
+    PolishBookLanguage() { Hyphenator::setPreferredLanguage("pl"); }
+    ~PolishBookLanguage() { Hyphenator::setPreferredLanguage(""); }
+  };
+
+  {
+    PolishBookLanguage polish;
+    feed("aaaa i domu");
+    const auto lines = layout(48);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[0], (std::vector<std::string>{"aaaa"}));
+    EXPECT_EQ(lines[1], (std::vector<std::string>{"i", " ", "domu"}));
+  }
+
+  feed("aaaa i domu");
+  const auto english = layout(48);
+  ASSERT_EQ(english.size(), 2u);
+  EXPECT_EQ(english[0], (std::vector<std::string>{"aaaa", "i"}));
+  EXPECT_EQ(english[1], (std::vector<std::string>{"domu"}));
+
+  {
+    PolishBookLanguage polish;
+    feed("aa we domu");
+    const auto lines = layout(40);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[0], (std::vector<std::string>{"aa", "we"}));
+    EXPECT_EQ(lines[1], (std::vector<std::string>{"domu"}));
+
+    parser.currentTextBlock = std::make_unique<ParsedText>(false, false, BlockStyle(), 0);
+    parser.polishGlueArmed = false;
+    ChapterHtmlSlimParser::characterData(&parser, "aaaa w", 6);
+    ChapterHtmlSlimParser::characterData(&parser, " domu", 5);
+    const auto split = layout(48);
+    ASSERT_EQ(split.size(), 2u);
+    EXPECT_EQ(split[0], (std::vector<std::string>{"aaaa"}));
+    EXPECT_EQ(split[1], (std::vector<std::string>{"w", " ", "domu"}));
+
+    feed("aaaa W domu");
+    const auto capital = layout(48);
+    ASSERT_EQ(capital.size(), 2u);
+    EXPECT_EQ(capital[0], (std::vector<std::string>{"aaaa"}));
+    EXPECT_EQ(capital[1], (std::vector<std::string>{"W", " ", "domu"}));
+
+    feed("I\n");
+    const auto heading = layout(200);
+    ASSERT_EQ(heading.size(), 1u);
+    EXPECT_EQ(heading[0], (std::vector<std::string>{"I"}));
+
+    feed("aa \xe2\x80\x9ei do");
+    const auto quoted = layout(48);
+    ASSERT_EQ(quoted.size(), 2u);
+    EXPECT_EQ(quoted[0], (std::vector<std::string>{"aa"}));
+    EXPECT_EQ(quoted[1], (std::vector<std::string>{"\xe2\x80\x9e", "i", " ", "do"}));
+
+    feed("aa w. domu");
+    const auto dotted = layout(40);
+    ASSERT_EQ(dotted.size(), 2u);
+    EXPECT_EQ(dotted[0], (std::vector<std::string>{"aa", "w."}));
+    EXPECT_EQ(dotted[1], (std::vector<std::string>{"domu"}));
   }
 }
 

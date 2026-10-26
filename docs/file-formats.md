@@ -90,6 +90,14 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 68
+
+Version 68 preserves the binary layout but rebuilds completed and partial
+sections. When the book language selects the Polish hyphenator, a one-letter
+word (a, i, o, u, w, z, either case) stays on the same line as the word that
+follows. Other languages are unchanged. Book metadata and saved progress are
+kept.
+
 ### Version 67
 
 Version 67 preserves the binary layout but rebuilds completed and partial

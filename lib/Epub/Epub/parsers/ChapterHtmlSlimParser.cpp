@@ -23,6 +23,8 @@
 #include "Epub/converters/ImageDimsProbe.h"
 #include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "Epub/htmlEntities.h"
+#include "PolishLineGlue.h"
+#include "hyphenation/Hyphenator.h"
 
 // Minimum file size (in bytes) to show indexing popup - smaller chapters don't benefit from it
 constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
@@ -665,6 +667,8 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
   if (!currentTextBlock) {
     partWordBufferIndex = 0;
     nextWordContinues = false;
+    polishGlueArmed = false;
+    polishGlueOffset = 0;
     return;
   }
 
@@ -750,6 +754,8 @@ void ChapterHtmlSlimParser::breakTextLine(const BlockStyle& style) {
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle, const bool paragraphEnd) {
   if (stopRequested) return;
   nextWordContinues = false;  // New block = new paragraph, no continuation
+  polishGlueArmed = false;
+  polishGlueOffset = 0;
   if (currentTextBlock) {
     // already have a text block running and it is empty - just reuse it
     if (currentTextBlock->isEmpty()) {
@@ -1457,6 +1463,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         self->flushPartWordBuffer();
       }
       self->nextWordContinues = false;
+      self->polishGlueArmed = false;
       self->tableDepth += 1;
       self->depth += 1;
       return;
@@ -1570,6 +1577,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       tableCellBlockStyle.isRtl = cssStyle.direction == CssTextDirection::Rtl;
     }
 
+    self->polishGlueArmed = false;
     self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
                                                            tableCellBlockStyle, self->paragraphIndentSpaces);
     if (!self->currentTextBlock) {
@@ -2309,6 +2317,7 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   if (!self->currentTextBlock) {
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();
+    self->polishGlueArmed = false;
     self->currentTextBlock = makeUniqueNoThrow<ParsedText>(self->hyphenationEnabled, self->focusReadingEnabled,
                                                            flowStyle, self->paragraphIndentSpaces);
     if (!self->currentTextBlock) {
@@ -2399,12 +2408,59 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
     if (isWhitespace(s[i])) {
       // Currently looking at whitespace, if there's anything in the partWordBuffer, flush it
       if (self->partWordBufferIndex > 0) {
-        self->flushPartWordBuffer();
+        // Keep a one-letter Polish word with the next word. The continued space
+        // is emitted when that word starts, same shape as a no-break space, so
+        // the following word can still hyphenate. A trailing newline owes nothing.
+        // "we", "w.", and a letter flushed by an inline tag stay breakable.
+        // Opening punctuation ("„i") is its own token and stays with the letter.
+        size_t letterAt = 0;
+        size_t prefixCodepoints = 0;
+        const bool gluePolish =
+            Hyphenator::polishTypography() &&
+            polishSingleLetterWord(self->partWordBuffer, static_cast<size_t>(self->partWordBufferIndex), &letterAt,
+                                   &prefixCodepoints);
+        if (gluePolish) {
+          if (letterAt > 0) {
+            const char letter = self->partWordBuffer[letterAt];
+            const uint32_t wordOffset = self->partWordVisibleOffset;
+            self->partWordBufferIndex = static_cast<int>(letterAt);
+            self->flushPartWordBuffer();
+            self->partWordBuffer[0] = letter;
+            self->partWordBufferIndex = 1;
+            self->partWordVisibleOffset = wordOffset + static_cast<uint32_t>(prefixCodepoints);
+            self->nextWordContinues = true;
+          }
+          self->flushPartWordBuffer();
+          self->polishGlueArmed = true;
+          self->polishGlueOffset = codepointOffset;
+        } else {
+          self->flushPartWordBuffer();
+          // A second space, or a space in a later chunk, must not undo the glue.
+          if (!self->polishGlueArmed) self->nextWordContinues = false;
+        }
+      } else if (!self->polishGlueArmed) {
+        // Whitespace is a real word boundary — reset continuation state.
+        // Inline tags set the flag; a space after </b> is what clears it.
+        self->nextWordContinues = false;
       }
-      // Whitespace is a real word boundary — reset continuation state
-      self->nextWordContinues = false;
-      // Skip the whitespace char
       continue;
+    }
+
+    // The next word arrived. Emit the owed space so both sides continue.
+    // A no-break space is that glue itself; emitting another would double it.
+    if (self->polishGlueArmed) {
+      const bool nbsp = static_cast<uint8_t>(s[i]) == 0xC2 && i + 1 < len && static_cast<uint8_t>(s[i + 1]) == 0xA0;
+      const bool narrowNbsp = static_cast<uint8_t>(s[i]) == 0xE2 && i + 2 < len &&
+                              static_cast<uint8_t>(s[i + 1]) == 0x80 && static_cast<uint8_t>(s[i + 2]) == 0xAF;
+      if (!nbsp && !narrowNbsp && self->currentTextBlock) {
+        self->partWordBuffer[0] = ' ';
+        self->partWordBufferIndex = 1;
+        self->partWordVisibleOffset = self->polishGlueOffset;
+        self->nextWordContinues = true;
+        self->flushPartWordBuffer();
+        self->nextWordContinues = true;
+      }
+      self->polishGlueArmed = false;
     }
 
     // Detect U+00A0 (non-breaking space, UTF-8: 0xC2 0xA0) or
@@ -2621,6 +2677,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
       self->flushPartWordBuffer();
     }
     self->nextWordContinues = false;
+    self->polishGlueArmed = false;
     self->tableDepth -= 1;
     self->depth -= 1;
     LOG_DBG("EHP", "nested table flattened into enclosing cell");
@@ -2688,11 +2745,13 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   if (!insideSkippedSubtree && self->tableDepth == 1 && (strcmp(name, "td") == 0 || strcmp(name, "th") == 0)) {
     self->closeTableCell();
     self->nextWordContinues = false;
+    self->polishGlueArmed = false;
   }
 
   if (!insideSkippedSubtree && self->tableDepth == 1 && (strcmp(name, "tr") == 0)) {
     self->finishTableRow();
     self->nextWordContinues = false;
+    self->polishGlueArmed = false;
   }
 
   if (!insideSkippedSubtree && self->tableDepth == 1 && strcmp(name, "table") == 0) {
@@ -2708,6 +2767,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
     self->tableRowTextBytes = 0;
     self->tableRowCells.clear();
     self->nextWordContinues = false;
+    self->polishGlueArmed = false;
 
     const BlockStyle flowStyle =
         self->blockStyleStack.empty() ? BlockStyle() : self->blockStyleStack.back().withoutBottom();

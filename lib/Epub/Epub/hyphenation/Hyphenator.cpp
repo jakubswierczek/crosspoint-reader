@@ -11,6 +11,7 @@
 #include "LanguageRegistry.h"
 
 const LanguageHyphenator* Hyphenator::cachedHyphenator_ = nullptr;
+bool Hyphenator::polishTypographyActive_ = false;
 
 namespace {
 
@@ -272,4 +273,16 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   return breaks;
 }
 
-void Hyphenator::setPreferredLanguage(const std::string& lang) { cachedHyphenator_ = hyphenatorForLanguage(lang); }
+void Hyphenator::setPreferredLanguage(const std::string& lang) {
+  cachedHyphenator_ = hyphenatorForLanguage(lang);
+  const auto* polish = getLanguageHyphenatorForPrimaryTag("pl");
+  polishTypographyActive_ = polish != nullptr && cachedHyphenator_ == polish;
+}
+
+bool Hyphenator::polishTypography() { return polishTypographyActive_; }
+
+bool Hyphenator::replacePolishTypography(const bool active) {
+  const bool previous = polishTypographyActive_;
+  polishTypographyActive_ = active;
+  return previous;
+}

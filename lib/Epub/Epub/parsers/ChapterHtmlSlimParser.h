@@ -40,6 +40,11 @@ class ChapterHtmlSlimParser {
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
   int partWordBufferIndex = 0;
   bool nextWordContinues = false;  // true when next flushed word attaches to previous (inline element boundary)
+  // A Polish one-letter word was flushed and still owes its continued space.
+  // The space is emitted when the next word starts. A block end drops it, so a
+  // trailing newline does not leave a gap. Extra whitespace must not clear it.
+  bool polishGlueArmed = false;
+  uint32_t polishGlueOffset = 0;
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   // Ruby text state
   bool inRuby = false;
