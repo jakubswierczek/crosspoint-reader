@@ -1,6 +1,8 @@
 # Flashing this fork on an Xteink X4 Pro
 
-These steps are for a Mac flashing the `x4pro` build of this fork. The environment name in `platformio.ini` is `x4pro` (ESP32-S3, 16 MB flash, 8 MB PSRAM). Do not use `pio run --target upload` with no `-e`: the default environment is the ESP32-C3 X3/X4 image.
+These steps are for a Mac flashing the `x4pro` build of branch `cursor/x4pro-pl-secure`. That image is the security integration (access code, WPA2 hotspot, path denylist, plugin URL limits, `v2.` password obfuscation, HTTPS verification, and the ZIP size check) plus the Polish UI: the Polish translation, the `pol` hyphenation tag, Polish keyboard letters, and keeping a short Polish word with the next word. Firmware signing is described in `docs/firmware-signing.md` and is not enforced.
+
+The environment name in `platformio.ini` is `x4pro` (ESP32-S3, 16 MB flash, 8 MB PSRAM). Do not use `pio run --target upload` with no `-e`: the default environment is the ESP32-C3 X3/X4 image. The file-transfer screen shows two secrets: the hotspot password and the web access code. The UI language can be set to Polski.
 
 Build the image from this branch:
 
