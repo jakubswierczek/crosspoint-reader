@@ -43,6 +43,8 @@ class CrossPointWebServerActivity final : public Activity {
   // Server status
   std::string connectedIP;
   std::string connectedSSID;  // For STA mode: network name, For AP mode: AP name
+  // WPA2 passphrase for this hotspot session. Not persisted and not logged.
+  char apPassword[11] = {};
 
   // Performance monitoring
   unsigned long lastHandleClientTime = 0;

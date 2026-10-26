@@ -7,6 +7,7 @@
 #include <HalGPIO.h>
 #include <I18n.h>
 #include <WiFi.h>
+#include <esp_random.h>
 
 #include <cstddef>
 
@@ -17,6 +18,7 @@
 #include "activities/network/CalibreConnectActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/HotspotPassword.h"
 #include "network/WebAccessCode.h"
 #include "util/PluginEvents.h"
 #include "util/QrUtils.h"
@@ -25,7 +27,6 @@
 namespace {
 // AP Mode configuration
 constexpr const char* AP_SSID = "CrossPoint-Reader";
-constexpr const char* AP_PASSWORD = nullptr;  // Open network for ease of use
 constexpr const char* AP_HOSTNAME = "crosspoint";
 constexpr uint8_t AP_CHANNEL = 1;
 constexpr uint8_t AP_MAX_CONNECTIONS = 4;
@@ -244,14 +245,16 @@ void CrossPointWebServerActivity::startAccessPoint() {
   WiFi.mode(WIFI_AP);
   delay(100);
 
-  // Start soft AP
-  bool apStarted;
-  if (AP_PASSWORD && strlen(AP_PASSWORD) >= 8) {
-    apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
-  } else {
-    // Open network (no password)
-    apStarted = WiFi.softAP(AP_SSID, nullptr, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
+  // New passphrase every time the hotspot starts. It stays on this activity
+  // (11 bytes) and is shown next to the Wi-Fi QR; it is not written to SD.
+  hotspot::generatePassword(apPassword, esp_random);
+  if (!hotspot::passwordCharsOk(apPassword)) {
+    LOG_ERR("WEBACT", "Hotspot password was not generated");
+    onGoHome();
+    return;
   }
+
+  const bool apStarted = WiFi.softAP(AP_SSID, apPassword, AP_CHANNEL, false, AP_MAX_CONNECTIONS);
 
   if (!apStarted) {
     LOG_ERR("WEBACT", "ERROR: Failed to start Access Point!");
@@ -497,13 +500,20 @@ void CrossPointWebServerActivity::renderServerRunning() const {
 
     // Show QR code for Wifi
     // follows spec at https://github.com/zxing/zxing/wiki/Barcode-Contents#wi-fi-network-config-android-ios-11
-    const std::string wifiConfig = std::string("WIFI:T:nopass;S:") + connectedSSID + ";;";
+    char wifiQr[80];
+    if (!hotspot::formatWifiQr(wifiQr, sizeof(wifiQr), connectedSSID.c_str(), apPassword)) {
+      LOG_ERR("WEBACT", "Hotspot QR payload was rejected");
+      wifiQr[0] = '\0';
+    }
+    const std::string wifiConfig(wifiQr);
     const Rect qrBoundsWifi(metrics.contentSidePadding, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBoundsWifi, wifiConfig);
 
-    // Show network name
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 80,
-                      connectedSSID.c_str());
+    // Show network name and the session passphrase beside the QR.
+    const int textX = metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing;
+    renderer.drawText(UI_10_FONT_ID, textX, startY + 60, connectedSSID.c_str());
+    renderer.drawText(UI_10_FONT_ID, textX, startY + 90, tr(STR_HOTSPOT_PASSWORD), true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, textX, startY + 110, apPassword);
 
     startY += QR_CODE_HEIGHT + 2 * metrics.verticalSpacing;
 
