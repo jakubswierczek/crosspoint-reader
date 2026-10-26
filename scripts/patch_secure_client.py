@@ -98,11 +98,18 @@ SECURE_NEW_SNI = """  wolfSSL_UseSNI(ssl, WOLFSSL_SNI_HOST_NAME, host, strlen(ho
   }
 """
 
+OPDS_OLD_DECL = """bool opdsImplicitAuthenticate(const std::string& authenticateUrl, const std::string& username,
+                              const std::string& password, std::string& outToken) {
+"""
+OPDS_NEW_DECL = """extern "C" const char* crosspoint_tls_ca_pem();
+
+bool opdsImplicitAuthenticate(const std::string& authenticateUrl, const std::string& username,
+                              const std::string& password, std::string& outToken) {
+"""
 OPDS_OLD = """    http.setTimeout(AUTH_TIMEOUT_MS);
     http.setInsecure();
 """
 OPDS_NEW = """    http.setTimeout(AUTH_TIMEOUT_MS);
-    extern "C" const char* crosspoint_tls_ca_pem();
     if (const char* pem = crosspoint_tls_ca_pem()) http.setCACert(pem);
     else http.setInsecure();
 """
@@ -130,9 +137,11 @@ def patch_secure(text: str) -> str:
 def patch_opds(text: str) -> str:
     if "crosspoint_tls_ca_pem" in text:
         return text
-    if OPDS_OLD not in text:
-        raise RuntimeError("OpdsImplicitAuth.cpp no longer matches the reviewed patch")
-    return text.replace(OPDS_OLD, OPDS_NEW, 1)
+    for old, new in ((OPDS_OLD_DECL, OPDS_NEW_DECL), (OPDS_OLD, OPDS_NEW)):
+        if old not in text:
+            raise RuntimeError("OpdsImplicitAuth.cpp no longer matches the reviewed patch")
+        text = text.replace(old, new, 1)
+    return text
 
 
 def apply_one(path: Path, upstream: str, transform) -> None:
